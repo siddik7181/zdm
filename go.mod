@@ -2,9 +2,13 @@ module github.com/siddik7181/zdm
 
 go 1.26.9
 
-require vitess.io/vitess v0.24.5
+require (
+	github.com/go-sql-driver/mysql v1.10.2
+	vitess.io/vitess v0.24.5
+)
 
 require (
+	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/golang/glog v1.2.5 // indirect
 	github.com/lmittmann/tint v1.1.3 // indirect
 	github.com/mattn/go-isatty v0.0.21 // indirect

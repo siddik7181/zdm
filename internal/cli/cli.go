@@ -43,6 +43,8 @@ func Run(args []string, s Streams) int {
 		return exitOK
 	case "lint":
 		return lint(args[1:], s)
+	case "check":
+		return check(args[1:], s)
 	case "help", "-h", "--help":
 		usage(s.Out)
 		return exitOK
@@ -57,12 +59,22 @@ func usage(w io.Writer) {
 
 commands:
   lint <file|->   check a SQL migration for risky changes (reads stdin for "-")
+  check           read-only preflight of a live primary and its replicas
   version         print the version
 
 lint flags:
   --format text|json        output format (default text)
   --fail-on error|warning|info|never
                             exit 1 when a finding is at least this severe (default error)
+
+check flags:
+  --dsn DSN                 primary, user:pass@tcp(host:3306)/ (default $ZDM_DSN)
+  --replica-dsn DSN         gating replica; repeatable (also $ZDM_REPLICA_DSNS, whitespace separated)
+  --max-lag SECONDS         replica lag that warns (default 10)
+  --long-txn SECONDS        open-transaction age that warns (default 60)
+  --timeout DURATION        overall time limit (default 30s)
+  --format text|json
+  --fail-on fail|warn|never exit 1 at this status or worse (default fail)
 `)
 }
 

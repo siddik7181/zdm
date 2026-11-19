@@ -18,6 +18,16 @@ zdm lint migration.sql --format json --fail-on warning
 Exit code: 0 clean, 1 findings at or above `--fail-on` (default `error`), 2 usage or read error.
 Statements the parser cannot read are reported as `unparsed`, never silently skipped.
 
+```
+export ZDM_DSN='user:pass@tcp(primary:3306)/'     # keeps the password out of `ps`
+zdm check --replica-dsn 'user:pass@tcp(replica1:3306)/' --max-lag 10
+```
+
+`zdm check` is a read-only preflight: version (8.4 / 9.7), GTID and binlog settings, binlog
+retention, long-open transactions, and replication state and lag of every replica you list.
+Its connections set `transaction_read_only=1`, so the server refuses writes. Needs the `PROCESS`
+and `REPLICATION CLIENT` privileges. Run the lab tests with `make lab-up && make test-integration`.
+
 ## Documentation
 
 Design, research and decisions live in [docs/](docs/README.md):

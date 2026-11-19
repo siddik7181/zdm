@@ -87,6 +87,31 @@ func TestUsageErrors(t *testing.T) {
 	}
 }
 
+func TestCheckUsageErrors(t *testing.T) {
+	t.Setenv("ZDM_DSN", "")
+	t.Setenv("ZDM_REPLICA_DSNS", "")
+	for _, args := range [][]string{
+		{"check"}, // no DSN
+		{"check", "--dsn", "x", "extra"},
+		{"check", "--dsn", "x", "--format", "xml"},
+		{"check", "--dsn", "x", "--fail-on", "error"},
+		{"check", "--dsn", "x", "--long-txn", "0"},
+		{"check", "--dsn", "not a dsn"}, // unparsable
+		{"check", "--dsn", "u:p@tcp(127.0.0.1:3306)/", "--replica-dsn", "not a dsn"}, // bad replica
+	} {
+		if code, _, _ := run(t, "", args...); code != exitUsage {
+			t.Errorf("%v: exit %d, want %d", args, code, exitUsage)
+		}
+	}
+}
+
+func TestCheckErrorNeverEchoesPassword(t *testing.T) {
+	code, out, errOut := run(t, "", "check", "--dsn", "u:s3cretpw@tcp(127.0.0.1:1)/", "--timeout", "2s")
+	if code != exitUsage || strings.Contains(out+errOut, "s3cretpw") {
+		t.Fatalf("exit %d, output must not contain the password: %q %q", code, out, errOut)
+	}
+}
+
 func TestVersionAndHelp(t *testing.T) {
 	if code, out, _ := run(t, "", "version"); code != exitOK || strings.TrimSpace(out) != "dev" {
 		t.Fatalf("version: %d %q", code, out)

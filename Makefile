@@ -1,4 +1,4 @@
-.PHONY: help build test test-race cover lint fmt vet tidy check lab-up lab-down
+.PHONY: help build test test-race test-integration cover lint fmt vet tidy check lab-up lab-down
 
 help:
 	@echo "build      build ./bin/zdm"
@@ -21,6 +21,12 @@ test:
 
 test-race:
 	go test -race ./...
+
+# Needs the lab running (make lab-up). Run once per MYSQL_VERSION.
+test-integration:
+	ZDM_TEST_DSN='root:root@tcp(127.0.0.1:33306)/' \
+	ZDM_TEST_REPLICA_DSN='root:root@tcp(127.0.0.1:33307)/' \
+	go test -tags integration -count=1 ./internal/preflight
 
 cover:
 	go test -coverprofile=coverage.out ./...
