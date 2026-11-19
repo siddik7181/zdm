@@ -10,7 +10,7 @@ help:
 	@echo "vet        go vet"
 	@echo "tidy       go mod tidy"
 	@echo "check      fmt-check, vet, lint, test (what CI runs)"
-	@echo "lab-up     start the local MySQL lab (when docker/ exists)"
+	@echo "lab-up     start + wire the MySQL lab (MYSQL_VERSION=8.4|9.7)"
 	@echo "lab-down   stop it"
 
 build:
@@ -42,6 +42,7 @@ check: vet lint test
 
 lab-up:
 	docker compose -f docker/compose.yml up -d
+	docker/init-replicas.sh
 
 lab-down:
 	docker compose -f docker/compose.yml down -v

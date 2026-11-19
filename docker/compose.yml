@@ -1,0 +1,38 @@
+# Local lab: 1 primary + 2 async replicas. Pick the version with MYSQL_VERSION=8.4|9.7.
+x-mysql: &mysql
+  image: mysql:${MYSQL_VERSION:-8.4}
+  environment:
+    MYSQL_ROOT_PASSWORD: root
+
+x-hc: &hc
+  test: ["CMD", "mysqladmin", "ping", "-uroot", "-proot", "--silent"]
+  interval: 3s
+  retries: 40
+
+services:
+  primary:
+    <<: *mysql
+    ports: ["33306:3306"]
+    command: >
+      --server-id=1 --gtid-mode=ON --enforce-gtid-consistency=ON
+      --binlog-format=ROW --binlog-row-image=FULL
+    healthcheck: *hc
+
+  replica1:
+    <<: *mysql
+    ports: ["33307:3306"]
+    depends_on: { primary: { condition: service_healthy } }
+    command: >
+      --server-id=2 --gtid-mode=ON --enforce-gtid-consistency=ON
+      --binlog-format=ROW --binlog-row-image=FULL --log-replica-updates=ON
+    healthcheck: *hc
+
+  # Models a remote region: init-replicas.sh gives it a 5s apply delay.
+  replica2:
+    <<: *mysql
+    ports: ["33308:3306"]
+    depends_on: { primary: { condition: service_healthy } }
+    command: >
+      --server-id=3 --gtid-mode=ON --enforce-gtid-consistency=ON
+      --binlog-format=ROW --binlog-row-image=FULL --log-replica-updates=ON
+    healthcheck: *hc
