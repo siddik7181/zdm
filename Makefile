@@ -26,7 +26,7 @@ test-race:
 test-integration:
 	ZDM_TEST_DSN='root:root@tcp(127.0.0.1:33306)/' \
 	ZDM_TEST_REPLICA_DSN='root:root@tcp(127.0.0.1:33307)/' \
-	go test -tags integration -count=1 ./internal/preflight
+	go test -tags integration -count=1 ./internal/...
 
 cover:
 	go test -coverprofile=coverage.out ./...

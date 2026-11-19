@@ -58,9 +58,13 @@ func TestBuildExecuteAndOptions(t *testing.T) {
 	if !slices.Contains(run.Args, "--execute") || !slices.Contains(run.Args, "--ok-to-drop-table") {
 		t.Errorf("args: %v", run.Args)
 	}
+	c.ReplicaHost, c.ReplicaPort = "replica", 3307
 	pt, _ := Build(plan.Default("app", "t", "ADD COLUMN c INT NULL", plan.PtOsc), c, false)
 	defer pt.Cleanup()
-	if !slices.Contains(pt.Args, "--dry-run") || !slices.Contains(pt.Args, "h=127.0.0.1,P=3306,D=app,t=t") {
+	if !slices.Contains(pt.Args, "--recursion-method=none") || !slices.ContainsFunc(pt.Args, func(a string) bool { return strings.HasPrefix(a, "--check-replica-lag=h=replica,P=3307,F=") }) {
+		t.Errorf("pt-osc replica args: %v", pt.Args)
+	}
+	if !slices.Contains(pt.Args, "--dry-run") || !slices.Contains(pt.Args, "--set-vars=lock_wait_timeout=2") || !slices.Contains(pt.Args, "h=127.0.0.1,P=3306,D=app,t=t") {
 		t.Errorf("pt-osc args: %v", pt.Args)
 	}
 }

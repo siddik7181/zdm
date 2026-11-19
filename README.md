@@ -28,6 +28,22 @@ retention, long-open transactions, and replication state and lag of every replic
 Its connections set `transaction_read_only=1`, so the server refuses writes. Needs the `PROCESS`
 and `REPLICATION CLIENT` privileges. Run the lab tests with `make lab-up && make test-integration`.
 
+```
+zdm plan --schema app --table orders --alter "ADD COLUMN note VARCHAR(64) NULL" --out plan.json
+zdm run plan.json --replica-dsn 'user:pass@tcp(replica1:3306)/'            # dry run: preflight + engine dry run
+zdm run plan.json --replica-dsn '...' --execute                            # really run; resumable
+zdm status plan.json
+```
+
+`plan` inspects the table and picks the engine: gh-ost, or pt-online-schema-change when the table has
+foreign keys, triggers or runs on Galera; it refuses tables with no primary or non-null unique key.
+`run --execute` goes preflight, engine (copy and cut-over), post-check, saving progress to
+`plan.json.state` after each phase. Re-running after a crash resumes at the failed phase. The engine
+binary (`gh-ost` or `pt-online-schema-change`) must be on `PATH`. Credentials go to the engine through a
+0600 temp file, never the command line. The post-check confirms the table exists, no helper tables
+are left, and the old table is kept (or dropped) as the plan says. It does **not** compare row data yet.
+Integration tests need the engines on `PATH`: `make lab-up && make test-integration`.
+
 ## Documentation
 
 Design, research and decisions live in [docs/](docs/README.md):

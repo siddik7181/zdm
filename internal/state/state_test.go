@@ -12,15 +12,15 @@ func TestPhasesAreOrdered(t *testing.T) {
 	if s.Next() != Preflight {
 		t.Fatalf("next = %s", s.Next())
 	}
-	if err := s.Complete(Swap, time.Now()); err == nil {
+	if err := s.Complete(Verify, time.Now()); err == nil {
 		t.Fatal("skipping phases must fail")
 	}
-	for _, p := range []Phase{Preflight, Copy, Verify, Swap} {
+	for _, p := range []Phase{Preflight, Migrate, Verify} {
 		if err := s.Complete(p, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if s.Next() != Done || s.Complete(Swap, time.Now()) == nil {
+	if s.Next() != Done || s.Complete(Verify, time.Now()) == nil {
 		t.Fatal("finished state must be Done and not repeatable")
 	}
 }
@@ -35,7 +35,7 @@ func TestSaveLoadAndPlanMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := Load(path, "h1")
-	if err != nil || !got.Has(Preflight) || got.Next() != Copy {
+	if err != nil || !got.Has(Preflight) || got.Next() != Migrate {
 		t.Fatalf("load: %+v %v", got, err)
 	}
 	if _, err := Load(path, "other"); !errors.Is(err, ErrPlanChanged) {

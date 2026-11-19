@@ -45,6 +45,12 @@ func Run(args []string, s Streams) int {
 		return lint(args[1:], s)
 	case "check":
 		return check(args[1:], s)
+	case "plan":
+		return planCmd(args[1:], s)
+	case "run":
+		return runCmd(args[1:], s)
+	case "status":
+		return statusCmd(args[1:], s)
 	case "help", "-h", "--help":
 		usage(s.Out)
 		return exitOK
@@ -60,7 +66,19 @@ func usage(w io.Writer) {
 commands:
   lint <file|->   check a SQL migration for risky changes (reads stdin for "-")
   check           read-only preflight of a live primary and its replicas
+  plan            inspect a table and write a plan file with the chosen engine
+  run <plan>      run a plan: preflight, engine, post-check; resumable
+  status <plan>   show which phase a plan is at
   version         print the version
+
+plan flags:
+  --dsn DSN --schema S --table T --alter "ADD COLUMN ..." [--engine auto|gh-ost|pt-osc] [--out FILE]
+
+run flags:
+  --dsn DSN                 primary (default $ZDM_DSN)
+  --replica-dsn DSN         replica the engine reads from (gh-ost)
+  --execute                 really run; without it: preflight + engine dry run, no state saved
+  --behind-proxy            skip gh-ost's port check (Docker port mapping, proxies)
 
 lint flags:
   --format text|json        output format (default text)

@@ -17,13 +17,12 @@ type Phase string
 // Pipeline phases.
 const (
 	Preflight Phase = "preflight"
-	Copy      Phase = "copy" // shadow table, capture, backfill and catch-up, run by the engine
+	Migrate   Phase = "migrate" // the engine copies rows and cuts over
 	Verify    Phase = "verify"
-	Swap      Phase = "swap"
 	Done      Phase = "done"
 )
 
-var order = []Phase{Preflight, Copy, Verify, Swap, Done}
+var order = []Phase{Preflight, Migrate, Verify, Done}
 
 // State is persisted next to the plan.
 type State struct {

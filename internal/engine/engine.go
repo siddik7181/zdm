@@ -25,6 +25,10 @@ type Conn struct {
 	Password string // never placed on the command line; written to a 0600 file
 	// PrimaryHost is the real primary when Host is a replica (gh-ost --assume-master-host).
 	PrimaryHost string
+	// ReplicaHost and ReplicaPort name the replica pt-osc throttles on; replica auto-discovery
+	// is turned off because it finds hosts the tool cannot reach (Docker, NAT, empty report_host).
+	ReplicaHost string
+	ReplicaPort int
 	// BehindProxy skips gh-ost's port check, needed with Docker port mapping or proxies.
 	BehindProxy bool
 }
@@ -102,8 +106,14 @@ func Build(p plan.Plan, c Conn, execute bool) (Spec, error) {
 			"--defaults-file=" + cred,
 			fmt.Sprintf("h=%s,P=%d,D=%s,t=%s", c.Host, c.Port, p.Schema, p.Table),
 			"--max-lag=" + strconv.Itoa(p.Cutover.MaxLagSeconds),
-			"--lock-wait-timeout=" + strconv.Itoa(p.Cutover.LockTimeoutSeconds),
+			"--set-vars=lock_wait_timeout=" + strconv.Itoa(p.Cutover.LockTimeoutSeconds),
+			// rebuild_constraints never leaves a moment where the table is missing, unlike drop_swap.
+			"--alter-foreign-keys-method=rebuild_constraints",
 			"--progress=time,10",
+			"--recursion-method=none",
+		}
+		if c.ReplicaHost != "" {
+			args = append(args, fmt.Sprintf("--check-replica-lag=h=%s,P=%d,F=%s", c.ReplicaHost, c.ReplicaPort, cred))
 		}
 		if p.KeepOldTable {
 			args = append(args, "--no-drop-old-table")

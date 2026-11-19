@@ -93,10 +93,24 @@ Lab: docker primary + 2 GTID replicas, 50k-row table, gh-ost run on a replica wi
 - gh-ost leaves the old table as `_t_del` unless `--ok-to-drop-table`; the wrapper must report it.
 - Not tested: pt-osc on either version, load, throttling, failure injection.
 
+## 7b. Spike: pt-online-schema-change 3.7.2 through zdm **[spike]**
+
+Run by hand, then by the integration test, against the lab on MySQL 8.4 and 9.7.
+- Adding a column to an FK child table and to an FK parent table both worked under concurrent
+  inserts; the child's foreign key survived (`--alter-foreign-keys-method=rebuild_constraints`).
+- There is no `--lock-wait-timeout`; the bound is `--set-vars lock_wait_timeout=N`.
+- Replica auto-discovery (`processlist,hosts`) finds replicas with an empty host behind Docker/NAT and
+  aborts the real run (the dry run does not notice). zdm uses `--recursion-method=none` plus an
+  explicit `--check-replica-lag=h=...,P=...,F=credfile`.
+- pt-osc writes, so it must connect to the primary. gh-ost is the one that reads from a replica.
+- With `--no-drop-old-table` the old tables (`_child_old`, `_parent_old`) keep their foreign keys,
+  so they still constrain the live parent until someone drops them.
+- A dry run is not a faithful rehearsal: two of the bugs above only showed in the real run.
+
 ## 8. Not researched
 
 - Competitor tools for lint/preflight: Skeema, Atlas, squawk (Postgres), PlanetScale tooling.
 - Postgres equivalents (pg_repack, pgroll, reshape, etc.).
 - AWS RDS/Aurora specifics.
-- pt-osc support for MySQL 8.4 and 9.7; gh-ost with FK tables on 9.7.
+- gh-ost with FK tables on 9.7; pt-osc licence terms for redistribution.
 - Full online-DDL operation tables for 8.4 and 9.7.
