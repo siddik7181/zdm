@@ -107,6 +107,19 @@ Run by hand, then by the integration test, against the lab on MySQL 8.4 and 9.7.
   so they still constrain the live parent until someone drops them.
 - A dry run is not a faithful rehearsal: two of the bugs above only showed in the real run.
 
+## 7c. Failure injection: backfill on MySQL 9.7 **[spike]**
+
+200,000-row table, chunk 500, run by hand on the lab.
+
+| Injection | Result |
+|---|---|
+| `kill -9` mid-run, then rerun | 100,500 rows done, checkpoint at key 100000. The rerun updated the remaining 99,500 rows and finished; all 200,000 rows set. Nothing lost, nothing done twice beyond one idempotent chunk. |
+| Replica SQL thread stopped | zdm refuses to continue: "cannot read replica lag, refusing to continue blind". It does not treat the lag as zero. |
+| Replica fully stopped (`STOP REPLICA`) | Same refusal. |
+
+The throttle itself (waiting while lag is over `--max-lag`) is covered by the integration test against the
+delayed replica. Not yet injected: binlog purge, failover or promotion, full disk, engine kill during `run`.
+
 ## 8. Not researched
 
 - Competitor tools for lint/preflight: Skeema, Atlas, squawk (Postgres), PlanetScale tooling.
