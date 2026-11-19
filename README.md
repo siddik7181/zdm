@@ -3,10 +3,20 @@
 Safety and orchestration for online MySQL schema changes: lint, preflight, resumable state,
 replica-aware cut-over, verify, rollback. Designed to work with gh-ost, pt-osc, or native DDL.
 
-> **Status: design phase.** Only the scaffold exists. No commands are implemented yet, and this
-> is not safe to point at a production database. It is also a learning project.
+> **Status: early.** Only `zdm lint` exists (offline, read-only). Nothing here touches a database
+> yet. It is also a learning project.
 
 **Targets:** MySQL 8.4 LTS and 9.7 LTS. MySQL 8.0 (EOL) is not supported.
+
+## Usage
+
+```
+alembic upgrade head --sql | zdm lint -        # any tool's SQL, or a file path
+zdm lint migration.sql --format json --fail-on warning
+```
+
+Exit code: 0 clean, 1 findings at or above `--fail-on` (default `error`), 2 usage or read error.
+Statements the parser cannot read are reported as `unparsed`, never silently skipped.
 
 ## Documentation
 

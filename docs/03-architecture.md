@@ -127,7 +127,7 @@ plain `.sql`). No tool-specific adapters.
 | Rule | Reason |
 |---|---|
 | Missing `ALGORITHM=INSTANT` pin on add-column | Silent fallback to COPY |
-| `LOCK=` clause combined with INSTANT | Rejected by MySQL (error 1221) |
+| `LOCK=` clause combined with INSTANT | Rejected by MySQL (error 1221); `LOCK=DEFAULT` is accepted. Verified on 8.4 and 9.7 |
 | Two ALTERs on the same table in one migration | Two lock acquisitions |
 | `NOT NULL` without default / unapproved default | Permanent default under strict mode |
 | Pinned `ALGORITHM` in a downgrade | Can break rollback |

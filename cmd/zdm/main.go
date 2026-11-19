@@ -2,17 +2,11 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
-	"github.com/siddik7181/zdm/internal/version"
+	"github.com/siddik7181/zdm/internal/cli"
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "version" {
-		fmt.Println(version.String())
-		return
-	}
-	fmt.Fprintln(os.Stderr, "zdm: no commands implemented yet (see docs/04-roadmap.md)")
-	os.Exit(2)
+	os.Exit(cli.Run(os.Args[1:], cli.Streams{In: os.Stdin, Out: os.Stdout, Err: os.Stderr}))
 }
