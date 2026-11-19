@@ -49,6 +49,8 @@ func Run(args []string, s Streams) int {
 		return planCmd(args[1:], s)
 	case "run":
 		return runCmd(args[1:], s)
+	case "verify":
+		return verifyCmd(args[1:], s)
 	case "rollback":
 		return rollbackCmd(args[1:], s)
 	case "finalize":
@@ -73,6 +75,7 @@ commands:
   plan            inspect a table and write a plan file with the chosen engine
   run <plan>      run a plan: preflight, engine, post-check; resumable
   status <plan>   show which phase a plan is at
+  verify <plan>   checksum the new table against the kept old table (only meaningful when both are idle)
   rollback <plan> put the old table back (atomic rename, bounded lock wait, retried)
   finalize <plan> drop the old table for good (irreversible, needs a flag)
   version         print the version
@@ -85,6 +88,9 @@ run flags:
   --replica-dsn DSN         replica the engine reads from (gh-ost)
   --execute                 really run; without it: preflight + engine dry run, no state saved
   --behind-proxy            skip gh-ost's port check (Docker port mapping, proxies)
+
+verify flags:
+  --dsn DSN  --chunk ROWS (default 5000)  --timeout DURATION  --format text|json
 
 rollback flags:
   --dsn DSN                 primary (default $ZDM_DSN)

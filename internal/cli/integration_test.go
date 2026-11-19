@@ -131,6 +131,11 @@ func TestPlanRunEndToEndWithPtOscForeignKeys(t *testing.T) {
 		if code := Run([]string{"run", "--execute", "--dsn", dsn, "--replica-dsn", replica, planFile}, s); code != 0 {
 			t.Fatalf("run %s: %d\n%s", table, code, errb.String())
 		}
+		// No writes since the change, so the old and new tables must hold the same data.
+		out.Reset()
+		if code := Run([]string{"verify", "--dsn", dsn, planFile}, s); code != 0 {
+			t.Fatalf("verify %s: %d\n%s%s", table, code, out.String(), errb.String())
+		}
 		var hasCol int
 		if err := db.QueryRow("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=? AND TABLE_NAME=? AND COLUMN_NAME='c'", schema, table).Scan(&hasCol); err != nil || hasCol != 1 {
 			t.Fatalf("%s: column not added: %d %v", table, hasCol, err)

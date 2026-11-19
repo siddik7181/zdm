@@ -68,10 +68,10 @@ Run S7 and S1 first: they decide whether the wrapper design holds.
 ## 5b. Status
 
 Done: lint, rules, `check`, docker lab, plan file, state, engine adapter with watchdog, `advise`,
-`rollback`/`finalize` (atomic rename with bounded retries, tested against a real metadata-lock blocker), `plan`/`run`/`status` (verified end to end on 8.4 and 9.7: gh-ost with concurrent writes, pt-osc on FK parent and child tables).
+`verify` (chunked checksums of old vs new table, quiesced use only), `rollback`/`finalize` (atomic rename with bounded retries, tested against a real metadata-lock blocker), `plan`/`run`/`status` (verified end to end on 8.4 and 9.7: gh-ost with concurrent writes, pt-osc on FK parent and child tables).
 Design change: gh-ost and pt-osc perform their own copy and cut-over, so zdm's phases are
-preflight, migrate, post-check. zdm's own forward cut-over and data verification (step 5) are not
-built (rollback is).
+preflight, migrate, post-check. zdm's own forward cut-over (step 5) is not built; rollback and quiesced
+verification are. Live-table verification is an open problem (engines do not offer it).
 
 ## 6. Immediate next step
 

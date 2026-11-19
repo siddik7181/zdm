@@ -43,9 +43,15 @@ binary (`gh-ost` or `pt-online-schema-change`) must be on `PATH`. Credentials go
 0600 temp file, never the command line. The post-check confirms the table exists, no helper tables
 are left, and the old table is kept (or dropped) as the plan says. It does **not** compare row data yet.
 ```
+zdm verify plan.json                                   # checksum the new table against the old one
 zdm rollback plan.json --discard-writes-since-swap     # put the old table back
 zdm finalize plan.json --drop-old-table                # drop it for good, once you are sure
 ```
+
+`verify` reads only (read-only session). It checksums both tables chunk by chunk over their common
+columns, in primary-key order, and prints the key ranges that differ. It is only meaningful while
+neither table is changing: after a live change, rows written since the swap are expected to differ.
+The checksum is CRC32-based, so it catches corruption and missing rows, not a deliberate collision.
 
 `rollback` is one atomic `RENAME TABLE` under a `lock_wait_timeout` set at connect time (the plan's
 `lock_timeout_seconds`). A blocked attempt changes nothing and is retried up to `max_attempts`; the
