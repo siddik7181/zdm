@@ -1,0 +1,18 @@
+[
+  {
+    "severity": "warning",
+    "rule": "missing-instant-pin",
+    "line": 5,
+    "statement": "ALTER TABLE tools ADD COLUMN owner VARCHAR(64) NULL",
+    "why": "Without ALGORITHM=INSTANT, MySQL silently falls back to a table rebuild if the change does not qualify.",
+    "fix": "Add ALGORITHM=INSTANT so an ineligible change fails instead of rebuilding."
+  },
+  {
+    "severity": "warning",
+    "rule": "unparsed",
+    "line": 9,
+    "statement": "THIS IS NOT SQL",
+    "why": "The statement could not be parsed, so it was not checked: syntax error at position 5 near 'THIS'",
+    "fix": "Check it by hand, or split it into smaller statements."
+  }
+]

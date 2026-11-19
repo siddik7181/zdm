@@ -1,0 +1,162 @@
+[
+  {
+    "severity": "warning",
+    "rule": "missing-instant-pin",
+    "line": 1,
+    "statement": "ALTER TABLE orders ADD COLUMN note TEXT NULL",
+    "why": "Without ALGORITHM=INSTANT, MySQL silently falls back to a table rebuild if the change does not qualify.",
+    "fix": "Add ALGORITHM=INSTANT so an ineligible change fails instead of rebuilding."
+  },
+  {
+    "severity": "warning",
+    "rule": "multiple-alters",
+    "line": 2,
+    "statement": "ALTER TABLE orders ADD COLUMN status INT NOT NULL",
+    "why": "A second ALTER on `orders` in the same migration takes another metadata lock and may rebuild twice.",
+    "fix": "Combine the changes into one ALTER TABLE, or split them into separate migrations."
+  },
+  {
+    "severity": "warning",
+    "rule": "missing-instant-pin",
+    "line": 2,
+    "statement": "ALTER TABLE orders ADD COLUMN status INT NOT NULL",
+    "why": "Without ALGORITHM=INSTANT, MySQL silently falls back to a table rebuild if the change does not qualify.",
+    "fix": "Add ALGORITHM=INSTANT so an ineligible change fails instead of rebuilding."
+  },
+  {
+    "severity": "warning",
+    "rule": "not-null-add-column",
+    "line": 2,
+    "statement": "ALTER TABLE orders ADD COLUMN status INT NOT NULL",
+    "why": "NOT NULL with no DEFAULT makes MySQL fill existing rows with an implicit value (0, '', ...) that the schema never states.",
+    "fix": "Add the column as NULL, backfill, then tighten later; or get the default approved explicitly."
+  },
+  {
+    "severity": "warning",
+    "rule": "multiple-alters",
+    "line": 3,
+    "statement": "ALTER TABLE orders ADD COLUMN flag INT NOT NULL DEFAULT 0, ALGORITHM=INSTANT, LOCK=NONE",
+    "why": "A second ALTER on `orders` in the same migration takes another metadata lock and may rebuild twice.",
+    "fix": "Combine the changes into one ALTER TABLE, or split them into separate migrations."
+  },
+  {
+    "severity": "error",
+    "rule": "instant-with-lock",
+    "line": 3,
+    "statement": "ALTER TABLE orders ADD COLUMN flag INT NOT NULL DEFAULT 0, ALGORITHM=INSTANT, LOCK=NONE",
+    "why": "ALGORITHM=INSTANT does not accept a LOCK clause; MySQL rejects the statement.",
+    "fix": "Remove the LOCK clause."
+  },
+  {
+    "severity": "warning",
+    "rule": "not-null-add-column",
+    "line": 3,
+    "statement": "ALTER TABLE orders ADD COLUMN flag INT NOT NULL DEFAULT 0, ALGORITHM=INSTANT, LOCK=NONE",
+    "why": "NOT NULL on an existing table needs a permanent default, and the default becomes part of the schema.",
+    "fix": "Add the column as NULL, backfill, then tighten later; or get the default approved explicitly."
+  },
+  {
+    "severity": "warning",
+    "rule": "multiple-alters",
+    "line": 4,
+    "statement": "ALTER TABLE orders MODIFY COLUMN note VARCHAR(10), ADD PRIMARY KEY (id)",
+    "why": "A second ALTER on `orders` in the same migration takes another metadata lock and may rebuild twice.",
+    "fix": "Combine the changes into one ALTER TABLE, or split them into separate migrations."
+  },
+  {
+    "severity": "warning",
+    "rule": "column-rewrite",
+    "line": 4,
+    "statement": "ALTER TABLE orders MODIFY COLUMN note VARCHAR(10), ADD PRIMARY KEY (id)",
+    "why": "Changing column `note` usually rebuilds the table and is not INSTANT.",
+    "fix": "Use expand/contract: add a new column, backfill, switch readers, drop the old one."
+  },
+  {
+    "severity": "warning",
+    "rule": "primary-key-change",
+    "line": 4,
+    "statement": "ALTER TABLE orders MODIFY COLUMN note VARCHAR(10), ADD PRIMARY KEY (id)",
+    "why": "Changing the primary key rebuilds the whole table.",
+    "fix": "Use an online schema change tool on a shadow table."
+  },
+  {
+    "severity": "warning",
+    "rule": "multiple-alters",
+    "line": 5,
+    "statement": "ALTER TABLE orders DROP COLUMN legacy, RENAME COLUMN a TO b",
+    "why": "A second ALTER on `orders` in the same migration takes another metadata lock and may rebuild twice.",
+    "fix": "Combine the changes into one ALTER TABLE, or split them into separate migrations."
+  },
+  {
+    "severity": "warning",
+    "rule": "breaking-column-change",
+    "line": 5,
+    "statement": "ALTER TABLE orders DROP COLUMN legacy, RENAME COLUMN a TO b",
+    "why": "Column `legacy` is dropped or renamed: cheap for MySQL, but application versions still running read the old name.",
+    "fix": "Deploy code that no longer uses the column first (contract phase), then drop or rename."
+  },
+  {
+    "severity": "warning",
+    "rule": "breaking-column-change",
+    "line": 5,
+    "statement": "ALTER TABLE orders DROP COLUMN legacy, RENAME COLUMN a TO b",
+    "why": "Column `a` is dropped or renamed: cheap for MySQL, but application versions still running read the old name.",
+    "fix": "Deploy code that no longer uses the column first (contract phase), then drop or rename."
+  },
+  {
+    "severity": "warning",
+    "rule": "multiple-alters",
+    "line": 6,
+    "statement": "ALTER TABLE orders ADD INDEX idx_a (a), ADD CONSTRAINT fk FOREIGN KEY (p) REFERENCES parent (id)",
+    "why": "A second ALTER on `orders` in the same migration takes another metadata lock and may rebuild twice.",
+    "fix": "Combine the changes into one ALTER TABLE, or split them into separate migrations."
+  },
+  {
+    "severity": "info",
+    "rule": "add-index",
+    "line": 6,
+    "statement": "ALTER TABLE orders ADD INDEX idx_a (a), ADD CONSTRAINT fk FOREIGN KEY (p) REFERENCES parent (id)",
+    "why": "A secondary index is built in place, but replicas apply it serially and can lag on a large table.",
+    "fix": "Check replica lag during the build; for very large tables use an online schema change tool."
+  },
+  {
+    "severity": "warning",
+    "rule": "add-foreign-key",
+    "line": 6,
+    "statement": "ALTER TABLE orders ADD INDEX idx_a (a), ADD CONSTRAINT fk FOREIGN KEY (p) REFERENCES parent (id)",
+    "why": "Adding a foreign key can take long locks and validates existing rows; gh-ost cannot run on tables with foreign keys.",
+    "fix": "Prefer pt-online-schema-change for tables with foreign keys, and check the parent key is unique."
+  },
+  {
+    "severity": "warning",
+    "rule": "multiple-alters",
+    "line": 7,
+    "statement": "ALTER TABLE orders ENGINE=InnoDB, ALGORITHM=COPY",
+    "why": "A second ALTER on `orders` in the same migration takes another metadata lock and may rebuild twice.",
+    "fix": "Combine the changes into one ALTER TABLE, or split them into separate migrations."
+  },
+  {
+    "severity": "error",
+    "rule": "algorithm-copy",
+    "line": 7,
+    "statement": "ALTER TABLE orders ENGINE=InnoDB, ALGORITHM=COPY",
+    "why": "ALGORITHM=COPY rebuilds the whole table and blocks writes while it runs.",
+    "fix": "Use an online schema change tool, or an expand/contract migration."
+  },
+  {
+    "severity": "error",
+    "rule": "unbounded-dml",
+    "line": 8,
+    "statement": "DELETE FROM orders",
+    "why": "UPDATE or DELETE with no WHERE touches every row in one transaction: long locks, huge undo log, replica lag.",
+    "fix": "Move the data change to a batched backfill (keyset pagination, throttled)."
+  },
+  {
+    "severity": "error",
+    "rule": "unbounded-dml",
+    "line": 9,
+    "statement": "UPDATE orders SET a = 1",
+    "why": "UPDATE or DELETE with no WHERE touches every row in one transaction: long locks, huge undo log, replica lag.",
+    "fix": "Move the data change to a batched backfill (keyset pagination, throttled)."
+  }
+]

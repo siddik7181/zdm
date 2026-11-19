@@ -171,7 +171,7 @@ zdm/
   internal/
     parse/      Vitess sqlparser wrapper (only place touching the parser)
     classify/   statement + version → INSTANT | INPLACE | COPY
-    rules/      one file per lint rule
+    rules/      lint rules (one file until it grows)
     advise/     strategy choice from facts + capabilities
     topo/       discovery, fingerprint, GTID, replica roles
     preflight/  live checks, capability detection
