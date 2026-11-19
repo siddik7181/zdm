@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/siddik7181/zdm/internal/plan"
 )
 
 func TestConnFromDSN(t *testing.T) {
@@ -22,7 +25,7 @@ func TestConnFromDSN(t *testing.T) {
 
 func TestPlanAndRunUsageErrors(t *testing.T) {
 	for _, args := range [][]string{
-		{"plan"}, {"plan", "--dsn", "x", "--engine", "magic"}, {"run"}, {"run", "plan.json"}, {"status"},
+		{"plan"}, {"plan", "--dsn", "x", "--engine", "magic"}, {"run"}, {"run", "plan.json"}, {"status"}, {"rollback"}, {"finalize"},
 	} {
 		if code := Run(args, Streams{Out: discard{}, Err: discard{}}); code != exitUsage {
 			t.Errorf("%v: exit %d, want %d", args, code, exitUsage)
@@ -33,3 +36,18 @@ func TestPlanAndRunUsageErrors(t *testing.T) {
 type discard struct{}
 
 func (discard) Write(b []byte) (int, error) { return len(b), nil }
+
+func TestDestructiveCommandsNeedConfirmationBeforeConnecting(t *testing.T) {
+	planFile := filepath.Join(t.TempDir(), "plan.json")
+	if err := plan.Default("app", "t", "ADD COLUMN c INT NULL", plan.GhOst).Save(planFile); err != nil {
+		t.Fatal(err)
+	}
+	// The DSN points nowhere; exit 2 with the flag message proves nothing was dialled.
+	for _, cmd := range []string{"rollback", "finalize"} {
+		var errb strings.Builder
+		code := Run([]string{cmd, "--dsn", "u:p@tcp(127.0.0.1:1)/", planFile}, Streams{Out: discard{}, Err: &errb})
+		if code != exitUsage || !strings.Contains(errb.String(), "pass --") {
+			t.Errorf("%s: exit %d, stderr %q", cmd, code, errb.String())
+		}
+	}
+}

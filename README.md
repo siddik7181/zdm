@@ -42,6 +42,17 @@ foreign keys, triggers or runs on Galera; it refuses tables with no primary or n
 binary (`gh-ost` or `pt-online-schema-change`) must be on `PATH`. Credentials go to the engine through a
 0600 temp file, never the command line. The post-check confirms the table exists, no helper tables
 are left, and the old table is kept (or dropped) as the plan says. It does **not** compare row data yet.
+```
+zdm rollback plan.json --discard-writes-since-swap     # put the old table back
+zdm finalize plan.json --drop-old-table                # drop it for good, once you are sure
+```
+
+`rollback` is one atomic `RENAME TABLE` under a `lock_wait_timeout` set at connect time (the plan's
+`lock_timeout_seconds`). A blocked attempt changes nothing and is retried up to `max_attempts`; the
+schema is inspected before each attempt, so re-running after a crash is safe. The rejected table is
+parked as `_<table>_rolled_back`, never dropped. Rows written since the change exist only in the
+parked table, hence the required flag. Both commands need write privileges.
+
 Integration tests need the engines on `PATH`: `make lab-up && make test-integration`.
 
 ## Documentation
