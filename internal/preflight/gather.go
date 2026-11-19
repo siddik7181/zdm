@@ -92,7 +92,7 @@ func Gather(ctx context.Context, primary *sql.DB, replicas []Replica, longTxnSec
 
 	f.LongTxns, f.LongTxnsErr = longTxns(ctx, primary, longTxnSeconds)
 	for _, r := range replicas {
-		f.Replicas = append(f.Replicas, replicaFacts(ctx, r.Addr, r.DB))
+		f.Replicas = append(f.Replicas, ReadReplica(ctx, r.Addr, r.DB))
 	}
 	return f, nil
 }
@@ -116,7 +116,8 @@ func longTxns(ctx context.Context, db *sql.DB, seconds int) ([]Txn, error) {
 	return out, rows.Err()
 }
 
-func replicaFacts(ctx context.Context, addr string, db *sql.DB) ReplicaFacts {
+// ReadReplica reports replication state and lag of one replica.
+func ReadReplica(ctx context.Context, addr string, db *sql.DB) ReplicaFacts {
 	r := ReplicaFacts{Addr: addr}
 	rows, err := db.QueryContext(ctx, "SHOW REPLICA STATUS")
 	if err != nil {

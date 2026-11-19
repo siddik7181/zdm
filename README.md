@@ -48,6 +48,16 @@ zdm rollback plan.json --discard-writes-since-swap     # put the old table back
 zdm finalize plan.json --drop-old-table                # drop it for good, once you are sure
 ```
 
+```
+zdm backfill --dsn ... --schema S --table T --set "c = 1" --where "c IS NULL" --replica-dsn ...   # dry run: counts
+zdm backfill ... --execute                                                                       # really update
+```
+
+`backfill` updates existing rows in primary-key chunks (default 1000), sleeping between chunks and
+waiting while any `--replica-dsn` is more than `--max-lag` behind. Unknown lag stops the run; it is never
+treated as zero. It resumes from `--checkpoint`, and creating `--stop-file` stops it cleanly. `--set` must
+be idempotent: the last chunk may run again after a crash.
+
 `verify` reads only (read-only session). It checksums both tables chunk by chunk over their common
 columns, in primary-key order, and prints the key ranges that differ. It is only meaningful while
 neither table is changing: after a live change, rows written since the swap are expected to differ.
