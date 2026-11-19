@@ -12,6 +12,7 @@ These docs capture the discussion, research, decisions and plan so nothing is lo
 | [03-architecture.md](03-architecture.md) | Pipeline, strategy selection, cut-over, topology and crash safety, layout |
 | [04-roadmap.md](04-roadmap.md) | Build order, learning milestones, spikes, open-source plan |
 | [05-decisions-and-open-questions.md](05-decisions-and-open-questions.md) | Decisions made, positioning, risks, open questions |
+| [06-landscape.md](06-landscape.md) | Competitors (incl. Spirit), name clash, licences |
 
 ## Status (2026-11-19)
 

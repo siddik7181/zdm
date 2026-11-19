@@ -7,4 +7,4 @@
    `[verify]` in the docs.
 5. Nothing that mutates a database may default to executing: dry-run first, explicit flag to execute.
 
-Security issues: do not open a public issue; see `SECURITY.md` once it exists.
+Security issues: do not open a public issue; see `SECURITY.md`.
