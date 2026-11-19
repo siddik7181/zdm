@@ -58,6 +58,15 @@ func TestBuildExecuteAndOptions(t *testing.T) {
 	if !slices.Contains(run.Args, "--execute") || !slices.Contains(run.Args, "--ok-to-drop-table") {
 		t.Errorf("args: %v", run.Args)
 	}
+	if slices.Contains(run.Args, "--initially-drop-ghost-table") {
+		t.Errorf("fresh run must not drop leftovers: %v", run.Args)
+	}
+	c.Resume = true
+	res, _ := Build(p, c, true)
+	defer res.Cleanup()
+	if !slices.Contains(res.Args, "--initially-drop-ghost-table") {
+		t.Errorf("resume must drop leftovers: %v", res.Args)
+	}
 	c.ReplicaHost, c.ReplicaPort = "replica", 3307
 	pt, _ := Build(plan.Default("app", "t", "ADD COLUMN c INT NULL", plan.PtOsc), c, false)
 	defer pt.Cleanup()

@@ -182,9 +182,11 @@ func runCmd(args []string, s Streams) int {
 	defer stop()
 	log := func(m string) { fmt.Fprintln(s.Out, m) }
 
+	var resumed bool
 	steps := runner.Steps{
 		state.Preflight: func(ctx context.Context) error { return runPreflight(ctx, primary, replicas, p) },
 		state.Migrate: func(ctx context.Context) error {
+			conn.Resume = resumed
 			spec, err := engine.Build(p, conn, true)
 			if err != nil {
 				return err
@@ -203,6 +205,7 @@ func runCmd(args []string, s Streams) int {
 		fmt.Fprintf(s.Err, "zdm: %v\n", err)
 		return exitUsage
 	}
+	resumed = len(st.Completed) > 0
 	if _, err := runner.Run(ctx, st, statePath(planPath), steps, time.Now, log); err != nil {
 		fmt.Fprintf(s.Err, "zdm: %v\n", err)
 		return exitFindings

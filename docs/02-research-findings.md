@@ -117,6 +117,13 @@ Run by hand, then by the integration test, against the lab on MySQL 8.4 and 9.7.
 | Replica SQL thread stopped | zdm refuses to continue: "cannot read replica lag, refusing to continue blind". It does not treat the lag as zero. |
 | Replica fully stopped (`STOP REPLICA`) | Same refusal. |
 
+Engine killed mid-`run` (1.5M rows, `kill -9` of zdm, 9.7):
+
+| Engine | Left behind | Resume |
+|---|---|---|
+| gh-ost | `_t_gho`, `_t_ghc`; the process died with zdm. Live table untouched. | First attempt failed: `table _t_gho already exists`. Fixed: a resumed run passes `--initially-drop-ghost-table --initially-drop-socket-file`. Then completed, 1.5M rows, new column present. |
+| pt-osc | `_t_new` and **three triggers on the live table**, still firing on every write. | Fails: "has triggers but --preserve-triggers was not specified". No force flag exists, so `zdm cleanup` was added; after it, the rerun completed. |
+
 The throttle itself (waiting while lag is over `--max-lag`) is covered by the integration test against the
 delayed replica. Not yet injected: binlog purge, failover or promotion, full disk, engine kill during `run`.
 

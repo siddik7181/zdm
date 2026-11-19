@@ -49,6 +49,8 @@ func Run(args []string, s Streams) int {
 		return planCmd(args[1:], s)
 	case "run":
 		return runCmd(args[1:], s)
+	case "cleanup":
+		return cleanupCmd(args[1:], s)
 	case "backfill":
 		return backfillCmd(args[1:], s)
 	case "verify":
@@ -77,6 +79,7 @@ commands:
   plan            inspect a table and write a plan file with the chosen engine
   run <plan>      run a plan: preflight, engine, post-check; resumable
   status <plan>   show which phase a plan is at
+  cleanup <plan>  list (or drop) helper tables and triggers a killed engine left behind
   backfill        update existing rows in small throttled chunks (dry run unless --execute)
   verify <plan>   checksum the new table against the kept old table (only meaningful when both are idle)
   rollback <plan> put the old table back (atomic rename, bounded lock wait, retried)

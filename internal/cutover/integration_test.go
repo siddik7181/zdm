@@ -120,3 +120,36 @@ func TestNothingToRollBackAndDropOld(t *testing.T) {
 		t.Fatalf("want ErrNothingToRollBack, got %v", err)
 	}
 }
+
+func TestCleanupDropsOnlyEngineHelpers(t *testing.T) {
+	db, p := setup(t, "zdm_cut5")
+	p.Engine = plan.PtOsc
+	ctx := context.Background()
+	for _, q := range []string{
+		"CREATE TABLE zdm_cut5._t_new (id INT PRIMARY KEY)",
+		"CREATE TRIGGER zdm_cut5.pt_osc_zdm_cut5_t_ins AFTER INSERT ON zdm_cut5.t FOR EACH ROW SET @x = 1",
+		"CREATE TRIGGER zdm_cut5.pt_osc_zdm_cut5_t_upd AFTER UPDATE ON zdm_cut5.t FOR EACH ROW SET @x = 1",
+		"CREATE TRIGGER zdm_cut5.mine AFTER DELETE ON zdm_cut5.t FOR EACH ROW SET @x = 1",
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	found, err := Leftovers(ctx, db, p)
+	if err != nil || len(found) != 3 {
+		t.Fatalf("want 3 leftovers (_t_new + 2 triggers), got %v, %v", found, err)
+	}
+	if _, err := Cleanup(ctx, db, p); err != nil {
+		t.Fatal(err)
+	}
+	found, _ = Leftovers(ctx, db, p)
+	if len(found) != 0 {
+		t.Fatalf("leftovers remain: %v", found)
+	}
+	var n int
+	_ = db.QueryRow("SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA='zdm_cut5' AND TRIGGER_NAME='mine'").Scan(&n)
+	ok, _ := exists(ctx, db, "zdm_cut5", "_t_del")
+	if n != 1 || !ok {
+		t.Fatalf("user trigger or old table was dropped: trigger=%d old=%v", n, ok)
+	}
+}

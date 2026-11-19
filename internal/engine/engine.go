@@ -31,6 +31,9 @@ type Conn struct {
 	ReplicaPort int
 	// BehindProxy skips gh-ost's port check, needed with Docker port mapping or proxies.
 	BehindProxy bool
+	// Resume means an earlier attempt may have been killed; gh-ost then drops its own leftover
+	// ghost table and socket file instead of refusing to start.
+	Resume bool
 }
 
 // Spec is a runnable command plus files to delete afterwards.
@@ -92,6 +95,9 @@ func Build(p plan.Plan, c Conn, execute bool) (Spec, error) {
 		}
 		if c.BehindProxy {
 			args = append(args, "--skip-port-validation")
+		}
+		if c.Resume {
+			args = append(args, "--initially-drop-ghost-table", "--initially-drop-socket-file")
 		}
 		if !p.KeepOldTable {
 			args = append(args, "--ok-to-drop-table")

@@ -58,6 +58,12 @@ waiting while any `--replica-dsn` is more than `--max-lag` behind. Unknown lag s
 treated as zero. It resumes from `--checkpoint`, and creating `--stop-file` stops it cleanly. `--set` must
 be idempotent: the last chunk may run again after a crash.
 
+If zdm or the engine is killed mid-run, the engine's helper objects stay behind: gh-ost's `_t_gho` and
+`_t_ghc`, and for pt-osc `_t_new` plus three triggers that keep slowing every write to the live table.
+`zdm cleanup plan.json` lists them; `zdm cleanup --engine-is-stopped plan.json` drops them (only after
+you checked the engine is not running). gh-ost leftovers are dropped automatically when `run --execute`
+resumes; pt-osc needs `cleanup` first.
+
 `verify` reads only (read-only session). It checksums both tables chunk by chunk over their common
 columns, in primary-key order, and prints the key ranges that differ. It is only meaningful while
 neither table is changing: after a live change, rows written since the swap are expected to differ.

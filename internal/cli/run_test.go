@@ -25,7 +25,7 @@ func TestConnFromDSN(t *testing.T) {
 
 func TestPlanAndRunUsageErrors(t *testing.T) {
 	for _, args := range [][]string{
-		{"plan"}, {"plan", "--dsn", "x", "--engine", "magic"}, {"run"}, {"run", "plan.json"}, {"status"}, {"rollback"}, {"finalize"}, {"verify"}, {"backfill"}, {"backfill", "--dsn", "x", "--schema", "a", "--table", "t", "--set", "c=1; DROP TABLE t"},
+		{"plan"}, {"plan", "--dsn", "x", "--engine", "magic"}, {"run"}, {"run", "plan.json"}, {"status"}, {"rollback"}, {"finalize"}, {"verify"}, {"backfill"}, {"cleanup"}, {"backfill", "--dsn", "x", "--schema", "a", "--table", "t", "--set", "c=1; DROP TABLE t"},
 	} {
 		if code := Run(args, Streams{Out: discard{}, Err: discard{}}); code != exitUsage {
 			t.Errorf("%v: exit %d, want %d", args, code, exitUsage)
