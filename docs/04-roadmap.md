@@ -73,7 +73,13 @@ Design change: gh-ost and pt-osc perform their own copy and cut-over, so zdm's p
 preflight, migrate, post-check. zdm's own forward cut-over (step 5) is not built; rollback and quiesced
 verification are. Live-table verification is an open problem (engines do not offer it).
 
-## 6. Immediate next step
+**Not done** (do not claim production readiness): Cloud SQL spikes S1-S4, S6, S7 (need a real instance);
+failure injection for binlog purge, failover or promotion, full disk; live-table verification; lint
+rules that need live facts (row counts, replica state); zdm's own forward cut-over; goreleaser config;
+the CI integration matrix has never run (it only runs on GitHub); no remote repository yet; name clash
+with DataStax `zdm-proxy` unresolved (see `06-landscape.md`).
+
+## 6. Immediate next step (historical, milestone 1 is done)
 
 Milestone 1: create a Docker lab in this repo (`docker/`): MySQL 8.4 and 9.7, one primary and two replicas,
 GTID on, `binlog_format=ROW`, `binlog_row_image=FULL`, replicas read-only, an injectable delay on one

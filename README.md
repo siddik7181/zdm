@@ -3,8 +3,9 @@
 Safety and orchestration for online MySQL schema changes: lint, preflight, resumable state,
 replica-aware cut-over, verify, rollback. Designed to work with gh-ost, pt-osc, or native DDL.
 
-> **Status: early.** Only `zdm lint` exists (offline, read-only). Nothing here touches a database
-> yet. It is also a learning project.
+> **Status: pre-release, not production-ready.** Tested only on a local Docker lab (MySQL 8.4 and 9.7,
+> one primary, two replicas) with gh-ost 1.1.11 and pt-osc 3.7.2. **Not tested on Cloud SQL**, on tables
+> of production size, or through a failover or binlog purge. Try it on a copy first. It is also a learning project.
 
 **Targets:** MySQL 8.4 LTS and 9.7 LTS. MySQL 8.0 (EOL) is not supported.
 
