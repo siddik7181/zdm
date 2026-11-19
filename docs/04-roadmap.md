@@ -44,7 +44,7 @@ Milestones 1-4 involve no code and build intuition. Milestone 9 is the hard one;
 | S5 | Local docker: primary + 2 replicas, one delayed | Validate swap-GTID wait and lag gate | No (can build locally) |
 | S6 | `lock_wait_timeout` behavior on Cloud SQL; blocked `RENAME` | Confirm the bounded retry loop | Yes |
 | S7 | `SHOW GRANTS` for the Cloud SQL default user | Privilege question | Yes |
-| S8 | gh-ost and pt-osc on MySQL 8.4 and 9.7, incl. FK tables on 9.7 | Version compatibility | No (local) |
+| S8 | gh-ost and pt-osc on MySQL 8.4 and 9.7, incl. FK tables on 9.7 | Version compatibility | No (local). **Partly done**: gh-ost works on both; pt-osc and FK-on-9.7 open (see 02 §7) |
 | S9 | Read full online-DDL tables for 8.4 and 9.7 | Generate the classifier | No |
 
 Run S7 and S1 first: they decide whether the wrapper design holds.

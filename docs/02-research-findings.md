@@ -78,10 +78,25 @@ Expand/migrate/contract guidance (Erzon, Encore): old and new code must work wit
 backfill in 1k-10k batches with pauses, resumable, verified before switching reads; contract is the
 point of no return. Rehearse on production-size staging to learn lock and backfill times.
 
-## 7. Not researched
+## 7. Spike S8 (local, run by hand): gh-ost 1.1.11 on MySQL 8.4.13 and 9.7.4 **[spike]**
+
+Lab: docker primary + 2 GTID replicas, 50k-row table, gh-ost run on a replica with
+`--assume-master-host` pointing at the primary (binary SHA-256 checked against the release's SHA256SUMS).
+
+- `ADD COLUMN` completed on **9.7.4** and **8.4.13**; the new column appeared on the primary and replicas.
+  The cut-over lock-and-rename lasted about 1s on the tiny table.
+- gh-ost aborts on a table with child-side or parent-side foreign keys (checked on 8.4 only).
+  This backs the rule "FKs present means use pt-osc". FK tables on 9.7 are **not** tested.
+- Behind Docker port mapping gh-ost fails with `unexpected database port reported: 3306`;
+  `--skip-port-validation` fixes it. Expect the same behind proxies, so the wrapper must expose it.
+- `--switch-to-rbr` and `--assume-rbr` are mutually exclusive.
+- gh-ost leaves the old table as `_t_del` unless `--ok-to-drop-table`; the wrapper must report it.
+- Not tested: pt-osc on either version, load, throttling, failure injection.
+
+## 8. Not researched
 
 - Competitor tools for lint/preflight: Skeema, Atlas, squawk (Postgres), PlanetScale tooling.
 - Postgres equivalents (pg_repack, pgroll, reshape, etc.).
 - AWS RDS/Aurora specifics.
-- gh-ost / pt-osc support for MySQL 8.4 and 9.7.
+- pt-osc support for MySQL 8.4 and 9.7; gh-ost with FK tables on 9.7.
 - Full online-DDL operation tables for 8.4 and 9.7.
