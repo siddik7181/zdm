@@ -1,0 +1,34 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+    - errorlint
+    - misspell
+    - bodyclose
+    - gosec
+    - revive
+  settings:
+    errcheck:
+      check-type-assertions: true
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [gosec, errcheck]
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/siddik7181/zdm

@@ -1,0 +1,20 @@
+# binaries and build output
+/bin/
+/dist/
+/zdm
+*.exe
+*.test
+*.out
+coverage.html
+
+# plan/state files produced while running the tool locally
+plan.yaml
+*.zdm-state
+
+# docker lab data
+/docker/data/
+
+# editor / OS
+.idea/
+.vscode/
+.DS_Store
