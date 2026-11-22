@@ -256,6 +256,7 @@ func TestPrimaryRestartMidCopy(t *testing.T) {
 			needBin(t, bin)
 			schema := "zdm_sc_pr" + strings.ReplaceAll(eng, "-", "")
 			l := newLab(t, schema, 1_000_000, eng)
+			l.db.SetMaxIdleConns(0) // a restart leaves dead pooled connections
 			helper := map[string]string{"gh-ost": "_t_gho", "pt-osc": "_t_new"}[eng]
 			go func() {
 				if waitFor(t.Context(), 60*time.Second, func() bool { return tableExists(l.db, schema, helper) }) {
@@ -269,9 +270,11 @@ func TestPrimaryRestartMidCopy(t *testing.T) {
 			}
 			time.Sleep(10 * time.Second) // replicas reconnect
 			for attempt := 0; attempt < 3 && !l.hasColumn("c"); attempt++ {
-				Run([]string{"cleanup", "--engine-is-stopped", "--dsn", l.dsn, l.plan}, l.s)
+				l.out.Reset()
+				ccode := Run([]string{"cleanup", "--engine-is-stopped", "--dsn", l.dsn, l.plan}, l.s)
+				t.Logf("cleanup exit %d: %s %s", ccode, tail(l.out.Bytes()), tail(l.errb.Bytes()))
 				if code := l.run("--execute"); code != 0 {
-					t.Logf("retry %d exit %d: %s", attempt, code, tail(l.errb.Bytes()))
+					t.Logf("retry %d exit %d: %s\nengine output tail:\n%s", attempt, code, tail(l.errb.Bytes()), tail(l.out.Bytes()))
 				}
 			}
 			if !l.hasColumn("c") || l.count("SELECT COUNT(*) FROM "+schema+".t") != 1<<20 {
