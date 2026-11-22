@@ -44,13 +44,35 @@ The replica was still applying the load's binlog when the run began, so gh-ost r
 throttle works, and a run started while a replica is behind is slow to start, not unsafe. Our preflight
 passed because the lag check looks at `Seconds_Behind_Source` at that moment and the load had just ended.
 
+## Same table with pt-online-schema-change 3.7.2
+
+Same lab and table (100M rows, now with column `c`), `ADD COLUMN d INT NULL`, engine forced to pt-osc in the
+plan, `--replica-dsn` replica 1 for lag checks. The concurrent writer ran for the whole copy
+(one insert and one hot-row update every ~10 ms).
+
+| Measure | Result |
+|---|---|
+| Total time | **11m43s**, about twice as fast as gh-ost's 22m53s on the same table |
+| Cut-over | Swap finished within 1 s of "Copied rows OK" |
+| Concurrent writes | 42,978 inserts into the new table (ids contiguous 200000000..200042977, none lost); 38,935 reached the old table before the swap, the rest after |
+| Replica 1 | 100,042,978 rows, matches the primary |
+| Checksum | Same `BIT_XOR(CRC32(...))` over the 99,999,999 original rows on `t` and `_t_old`: identical (`1682671320`) |
+| Leftovers | No triggers left; only the kept `_t_old` remains |
+| Disk | 21 GB free at the end (from 56 GB at the start, with both runs, the kept old tables and 3 servers) |
+
+Why gh-ost took longer is not established here. One likely factor is that gh-ost applies the concurrent
+binlog events through the same applier while copying, and throttled at the start. Do not read this as
+"pt-osc is faster": its triggers add cost to every write on the live table, which this run did not measure
+(the writer's own latency was not recorded). **Open question:** measure write latency on the live table
+during each engine.
+
 ## Not shown by this run
 
 - Billions of rows, or rows much wider than 8 bytes of payload (a wide table copies much more slowly).
 - A replica in another region, or any real network latency.
 - A write load heavier than about 100 writes a second.
 - Cloud SQL, its privileges, or its binlog retention.
-- pt-online-schema-change at this size. It copies through triggers, so expect a different cost on the live table.
+- Write latency on the live table during either engine (not recorded).
 - `zdm verify` at this size. The chunked checksum was not run here; the SQL checksum above stands in for it.
 - A failure at 100M rows (kill, replica stop, primary restart). Those were tested at about 1M rows only.
 
