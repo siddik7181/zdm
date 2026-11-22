@@ -4,8 +4,9 @@ Safety and orchestration for online MySQL schema changes: lint, preflight, resum
 replica-aware cut-over, verify, rollback. Designed to work with gh-ost, pt-osc, or native DDL.
 
 > **Status: pre-release, not production-ready.** Tested only on a local Docker lab (MySQL 8.4 and 9.7,
-> one primary, two replicas) with gh-ost 1.1.11 and pt-osc 3.7.2. **Not tested on Cloud SQL**, on tables
-> of production size, or through a failover or binlog purge. Try it on a copy first. It is also a learning project.
+> one primary, two replicas) with gh-ost 1.1.11 and pt-osc 3.7.2, up to a 100M-row table
+> ([results](docs/07-large-table-run.md)). **Not tested on Cloud SQL**, on billions of rows, or through a
+> failover or binlog purge. Try it on a copy first. It is also a learning project.
 
 **Targets:** MySQL 8.4 LTS and 9.7 LTS. MySQL 8.0 (EOL) is not supported.
 
@@ -87,13 +88,16 @@ Design, research and decisions live in [docs/](docs/README.md):
 
 ## Development
 
-Requires Go 1.24+ and [golangci-lint](https://golangci-lint.run) v2.
+Requires Go 1.26+ and [golangci-lint](https://golangci-lint.run) v2.
 
 ```
 make build    # ./bin/zdm
 make check    # vet + lint + test (same as CI)
 make fmt      # gofumpt + goimports
+make e2e      # Docker: MySQL 8.4 and 9.7 lab, integration + crash/failure tests (needs Docker, percona-toolkit)
 ```
+
+Docs: [docs/](docs/README.md) has the design, research findings, roadmap, landscape and the 100M-row run.
 
 ## What this is not
 
