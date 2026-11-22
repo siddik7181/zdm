@@ -73,6 +73,8 @@ Design change: gh-ost and pt-osc perform their own copy and cut-over, so zdm's p
 preflight, migrate, post-check. zdm's own forward cut-over (step 5) is not built; rollback and quiesced
 verification are. Live-table verification is an open problem (engines do not offer it).
 
+One 100M-row gh-ost run with concurrent writes passed on 9.7 (`07-large-table-run.md`).
+
 **Not done** (do not claim production readiness): Cloud SQL spikes S1-S4, S6, S7 (need a real instance);
 failure injection for binlog purge, failover or promotion, full disk; live-table verification; lint
 rules that need live facts (row counts, replica state); zdm's own forward cut-over; goreleaser config;

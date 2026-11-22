@@ -13,6 +13,7 @@ These docs capture the discussion, research, decisions and plan so nothing is lo
 | [04-roadmap.md](04-roadmap.md) | Build order, learning milestones, spikes, open-source plan |
 | [05-decisions-and-open-questions.md](05-decisions-and-open-questions.md) | Decisions made, positioning, risks, open questions |
 | [06-landscape.md](06-landscape.md) | Competitors (incl. Spirit), name clash, licences |
+| [07-large-table-run.md](07-large-table-run.md) | 100M-row gh-ost run: time, lag, checks, limits |
 
 ## Status (2026-11-19)
 
