@@ -8,3 +8,9 @@
 5. Nothing that mutates a database may default to executing: dry-run first, explicit flag to execute.
 
 Security issues: do not open a public issue; see `SECURITY.md`.
+
+## Docker tests
+
+`make e2e` installs gh-ost into `./bin`, then for MySQL 8.4 and 9.7 starts the lab, runs the integration
+tests (including SIGKILL-mid-copy-then-resume for gh-ost and pt-osc) and stops the lab. pt-online-schema-change
+must be installed (`brew install percona-toolkit` / `apt install percona-toolkit`). Needs Docker; takes minutes.

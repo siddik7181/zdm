@@ -124,6 +124,10 @@ Engine killed mid-`run` (1.5M rows, `kill -9` of zdm, 9.7):
 | gh-ost | `_t_gho`, `_t_ghc`; the process died with zdm. Live table untouched. | First attempt failed: `table _t_gho already exists`. Fixed: a resumed run passes `--initially-drop-ghost-table --initially-drop-socket-file`. Then completed, 1.5M rows, new column present. |
 | pt-osc | `_t_new` and **three triggers on the live table**, still firing on every write. | Fails: "has triggers but --preserve-triggers was not specified". No force flag exists, so `zdm cleanup` was added; after it, the rerun completed. |
 
+A killed client's `INSERT ... SELECT` keeps running on the MySQL server and holds a metadata lock, so the first
+`cleanup` hit error 1205 on `DROP TABLE _t_new`. Found by the automated crash test (`make e2e`); cleanup now retries
+lock timeouts and reports only objects it really dropped.
+
 The throttle itself (waiting while lag is over `--max-lag`) is covered by the integration test against the
 delayed replica. Not yet injected: binlog purge, failover or promotion, full disk, engine kill during `run`.
 

@@ -1,4 +1,4 @@
-.PHONY: help build test test-race test-integration cover lint fmt vet tidy check lab-up lab-down
+.PHONY: tools e2e help build test test-race test-integration cover lint fmt vet tidy check lab-up lab-down
 
 help:
 	@echo "build      build ./bin/zdm"
@@ -52,3 +52,17 @@ lab-up:
 
 lab-down:
 	docker compose -f docker/compose.yml down -v
+
+# gh-ost into ./bin (pt-online-schema-change comes from percona-toolkit: brew/apt install it).
+GHOST_VERSION ?= 1.1.11
+tools:
+	@mkdir -p bin
+	@os=$$(uname -s | tr A-Z a-z); arch=$$(uname -m); case $$arch in x86_64) arch=amd64;; aarch64|arm64) arch=arm64;; esac; \
+	curl -fsSL https://github.com/github/gh-ost/releases/download/v$(GHOST_VERSION)/gh-ost-$$os-$$arch.tar.gz | tar -xz -C bin gh-ost
+
+# Whole docker suite on both MySQL versions: lab up, integration tests, lab down. Takes several minutes.
+e2e: tools
+	@set -e; for v in 8.4 9.7; do \
+		echo "== MySQL $$v"; $(MAKE) lab-down >/dev/null 2>&1 || true; $(MAKE) lab-up MYSQL_VERSION=$$v >/dev/null; \
+		PATH="$(CURDIR)/bin:$$PATH" $(MAKE) test-integration || { $(MAKE) lab-down >/dev/null 2>&1; exit 1; }; \
+	done; $(MAKE) lab-down >/dev/null 2>&1

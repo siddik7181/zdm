@@ -5,9 +5,12 @@ import (
 	"database/sql"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/siddik7181/zdm/internal/plan"
 )
+
+const maxCleanupAttempts = 60
 
 // Leftover is a helper object an engine created and a crash left behind.
 type Leftover struct {
@@ -72,14 +75,16 @@ func Leftovers(ctx context.Context, db *sql.DB, p plan.Plan) ([]Leftover, error)
 	return out, rows.Err()
 }
 
-// Cleanup drops the leftovers. Triggers go first so the live table stops paying for them.
-// The caller must be sure the engine is not running: this would break a live migration.
-func Cleanup(ctx context.Context, db *sql.DB, p plan.Plan) ([]Leftover, error) {
+// Cleanup drops the leftovers and returns the ones actually dropped. Triggers go first so the live
+// table stops paying for them. The caller must be sure the engine is not running: this would break a
+// live migration. A killed client's statement can keep running on the server for a while and hold a
+// metadata lock, so a lock timeout is retried rather than treated as failure.
+func Cleanup(ctx context.Context, db *sql.DB, p plan.Plan, sleep func(context.Context, time.Duration) error) ([]Leftover, error) {
 	found, err := Leftovers(ctx, db, p)
 	if err != nil {
 		return nil, err
 	}
-	slices.SortStableFunc(found, func(a, b Leftover) int { // "trigger" sorts after "table", so flip it
+	slices.SortStableFunc(found, func(a, b Leftover) int {
 		if a.Kind == b.Kind {
 			return 0
 		}
@@ -88,14 +93,25 @@ func Cleanup(ctx context.Context, db *sql.DB, p plan.Plan) ([]Leftover, error) {
 		}
 		return 1
 	})
+	var dropped []Leftover
 	for _, l := range found {
 		stmt := "DROP TABLE IF EXISTS "
 		if l.Kind == "trigger" {
 			stmt = "DROP TRIGGER IF EXISTS "
 		}
-		if _, err := db.ExecContext(ctx, stmt+quote(p.Schema)+"."+quote(l.Name)); err != nil {
-			return found, err
+		for attempt := 1; ; attempt++ {
+			_, err = db.ExecContext(ctx, stmt+quote(p.Schema)+"."+quote(l.Name))
+			if err == nil {
+				break
+			}
+			if !retryable(err) || attempt >= maxCleanupAttempts {
+				return dropped, err
+			}
+			if err := sleep(ctx, time.Second); err != nil {
+				return dropped, err
+			}
 		}
+		dropped = append(dropped, l)
 	}
-	return found, nil
+	return dropped, nil
 }

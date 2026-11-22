@@ -38,7 +38,7 @@ func cleanupCmd(args []string, s Streams) int {
 		fmt.Fprintf(s.Out, "%d leftover(s); nothing dropped. Dropping during a live migration breaks it: once the engine is stopped, add --engine-is-stopped\n", len(found))
 		return exitOK
 	}
-	found, err := cutover.Cleanup(ctx, db, p)
+	found, err := cutover.Cleanup(ctx, db, p, cutover.Sleep)
 	for _, l := range found {
 		fmt.Fprintf(s.Out, "dropped %s %s\n", l.Kind, l.Name)
 	}

@@ -139,7 +139,7 @@ func TestCleanupDropsOnlyEngineHelpers(t *testing.T) {
 	if err != nil || len(found) != 3 {
 		t.Fatalf("want 3 leftovers (_t_new + 2 triggers), got %v, %v", found, err)
 	}
-	if _, err := Cleanup(ctx, db, p); err != nil {
+	if _, err := Cleanup(ctx, db, p, Sleep); err != nil {
 		t.Fatal(err)
 	}
 	found, _ = Leftovers(ctx, db, p)
