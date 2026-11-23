@@ -160,3 +160,24 @@ func ReadReplica(ctx context.Context, addr string, db *sql.DB) ReplicaFacts {
 	}
 	return r
 }
+
+// WaitQuiet blocks until no transaction has been open longer than seconds, so a cut-over does not
+// queue behind a metadata lock. onWait is called with the oldest transaction on every poll that
+// finds one. It returns early with the context's error.
+func WaitQuiet(ctx context.Context, db *sql.DB, seconds int, poll time.Duration, onWait func(Txn)) error {
+	for {
+		txns, err := longTxns(ctx, db, seconds)
+		if err != nil {
+			return fmt.Errorf("check open transactions: %w", err)
+		}
+		if len(txns) == 0 {
+			return nil
+		}
+		onWait(txns[0])
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(poll):
+		}
+	}
+}

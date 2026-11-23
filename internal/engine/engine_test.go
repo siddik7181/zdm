@@ -67,6 +67,12 @@ func TestBuildExecuteAndOptions(t *testing.T) {
 	if !slices.Contains(res.Args, "--initially-drop-ghost-table") {
 		t.Errorf("resume must drop leftovers: %v", res.Args)
 	}
+	c.PostponeFlag = "/tmp/gate"
+	gated, _ := Build(p, c, true)
+	defer gated.Cleanup()
+	if !slices.Contains(gated.Args, "--postpone-cut-over-flag-file=/tmp/gate") {
+		t.Errorf("gate flag missing: %v", gated.Args)
+	}
 	c.ReplicaHost, c.ReplicaPort = "replica", 3307
 	pt, _ := Build(plan.Default("app", "t", "ADD COLUMN c INT NULL", plan.PtOsc), c, false)
 	defer pt.Cleanup()

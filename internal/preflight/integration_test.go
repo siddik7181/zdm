@@ -78,3 +78,49 @@ func TestAgainstLab(t *testing.T) {
 		t.Errorf("lab primary should have no failing check")
 	}
 }
+
+func TestWaitQuietBlocksUntilTxnEnds(t *testing.T) {
+	dsn := env(t, "ZDM_TEST_DSN")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	db, _, err := Open(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	holder, _, err := Open(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Close() }()
+	conn, err := holder.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.ExecContext(ctx, "START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Second)
+
+	waits := 0
+	release := time.AfterFunc(3*time.Second, func() { _, _ = conn.ExecContext(context.Background(), "COMMIT") })
+	defer release.Stop()
+	start := time.Now()
+	if err := WaitQuiet(ctx, db, 1, 500*time.Millisecond, func(Txn) { waits++ }); err != nil {
+		t.Fatal(err)
+	}
+	if waits == 0 || time.Since(start) < 2*time.Second {
+		t.Errorf("returned while the transaction was open: waits=%d after %v", waits, time.Since(start))
+	}
+
+	cctx, ccancel := context.WithCancel(ctx)
+	if _, err := conn.ExecContext(ctx, "START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Second)
+	time.AfterFunc(time.Second, ccancel)
+	if err := WaitQuiet(cctx, db, 1, 200*time.Millisecond, func(Txn) {}); err == nil {
+		t.Error("a cancelled wait must return the context error")
+	}
+}
