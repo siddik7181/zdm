@@ -205,7 +205,7 @@ func runCmd(args []string, s Streams) int {
 				onLine = func(l string) {
 					fmt.Fprintln(s.Out, "  | "+l)
 					if strings.Contains(l, "Row copy complete") {
-						once.Do(func() { go openGate(ctx, primary, conn.PostponeFlag, s.Out) })
+						once.Do(func() { go openGate(ctx, primary, p, conn.PostponeFlag, s.Out) })
 					}
 				}
 			}
@@ -283,9 +283,10 @@ func runPreflight(ctx context.Context, primary *sql.DB, replicas []preflight.Rep
 
 // openGate lets gh-ost cut over once no long transaction could hold the swap back. If the check
 // itself fails, the cut-over is still released: gh-ost's own lock timeout bounds the damage.
-func openGate(ctx context.Context, db *sql.DB, flag string, out io.Writer) {
-	err := preflight.WaitQuiet(ctx, db, longTxnSeconds, 5*time.Second, func(t preflight.Txn) {
-		fmt.Fprintf(out, "cut-over held: transaction %s open %ds\n", t.ID, t.AgeSeconds)
+func openGate(ctx context.Context, db *sql.DB, p plan.Plan, flag string, out io.Writer) {
+	// A holder older than the lock timeout would make the swap attempt fail, so that is the bar.
+	err := preflight.WaitQuiet(ctx, db, p.Schema, p.Table, p.Cutover.LockTimeoutSeconds, 5*time.Second, func(t preflight.Txn) {
+		fmt.Fprintf(out, "cut-over held: session %s has held a lock on the table for %ds\n", t.ID, t.AgeSeconds)
 	})
 	if err != nil && ctx.Err() != nil {
 		return

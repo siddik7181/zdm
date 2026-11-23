@@ -161,19 +161,51 @@ func ReadReplica(ctx context.Context, addr string, db *sql.DB) ReplicaFacts {
 	return r
 }
 
-// WaitQuiet blocks until no transaction has been open longer than seconds, so a cut-over does not
-// queue behind a metadata lock. onWait is called with the oldest transaction on every poll that
-// finds one. It returns early with the context's error.
-func WaitQuiet(ctx context.Context, db *sql.DB, seconds int, poll time.Duration, onWait func(Txn)) error {
-	for {
-		txns, err := longTxns(ctx, db, seconds)
-		if err != nil {
-			return fmt.Errorf("check open transactions: %w", err)
+// holders lists sessions that hold a metadata lock on the table and have held it for at least
+// seconds. A transaction that touched the table keeps its lock until it commits; a plain SELECT
+// keeps it while it runs, which innodb_trx does not show.
+func holders(ctx context.Context, db *sql.DB, schema, table string, seconds int) ([]Txn, error) {
+	rows, err := db.QueryContext(ctx,
+		`SELECT th.PROCESSLIST_ID,
+		        GREATEST(COALESCE(TIMESTAMPDIFF(SECOND, trx.trx_started, NOW()), 0), COALESCE(th.PROCESSLIST_TIME, 0)) AS age
+		 FROM performance_schema.metadata_locks ml
+		 JOIN performance_schema.threads th ON th.THREAD_ID = ml.OWNER_THREAD_ID
+		 LEFT JOIN information_schema.innodb_trx trx ON trx.trx_mysql_thread_id = th.PROCESSLIST_ID
+		 WHERE ml.OBJECT_TYPE = 'TABLE' AND ml.OBJECT_SCHEMA = ? AND ml.OBJECT_NAME = ?
+		   AND ml.LOCK_STATUS = 'GRANTED' AND th.PROCESSLIST_ID IS NOT NULL
+		   AND th.PROCESSLIST_ID <> CONNECTION_ID()
+		 GROUP BY th.PROCESSLIST_ID, age HAVING age >= ? ORDER BY age DESC LIMIT 20`,
+		schema, table, seconds)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Txn
+	for rows.Next() {
+		var id int64
+		var t Txn
+		if err := rows.Scan(&id, &t.AgeSeconds); err != nil {
+			return nil, err
 		}
-		if len(txns) == 0 {
+		t.ID = fmt.Sprint(id)
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// WaitQuiet blocks until no session has held a metadata lock on the table for seconds or more, so
+// a cut-over does not queue behind it. onWait is called with the oldest holder on every poll that
+// finds one. It returns early with the context's error.
+func WaitQuiet(ctx context.Context, db *sql.DB, schema, table string, seconds int, poll time.Duration, onWait func(Txn)) error {
+	for {
+		hs, err := holders(ctx, db, schema, table, seconds)
+		if err != nil {
+			return fmt.Errorf("check metadata locks: %w", err)
+		}
+		if len(hs) == 0 {
 			return nil
 		}
-		onWait(txns[0])
+		onWait(hs[0])
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
