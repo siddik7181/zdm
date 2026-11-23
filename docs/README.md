@@ -14,6 +14,7 @@ These docs capture the discussion, research, decisions and plan so nothing is lo
 | [05-decisions-and-open-questions.md](05-decisions-and-open-questions.md) | Decisions made, positioning, risks, open questions |
 | [06-landscape.md](06-landscape.md) | Competitors (incl. Spirit), name clash, licences |
 | [07-large-table-run.md](07-large-table-run.md) | 100M-row gh-ost run: time, lag, checks, limits |
+| [08-cutover-pause.md](08-cutover-pause.md) | Insert latency during a run with live writers, long holders and replica lag |
 
 ## Status (2026-11-19)
 

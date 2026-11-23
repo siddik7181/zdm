@@ -76,11 +76,18 @@ verification are. Live-table verification is an open problem (engines do not off
 One 100M-row gh-ost run with concurrent writes passed on 9.7 (`07-large-table-run.md`).
 
 **Gated cut-over (gh-ost).** `zdm run` passes `--postpone-cut-over-flag-file`. When gh-ost reports
-"Row copy complete", zdm waits until no transaction older than 60 s is open (`preflight.WaitQuiet`), then
-removes the flag so the swap starts. The wait is unbounded (stop with Ctrl-C); pt-osc has no equivalent and
-relies on `lock_wait_timeout`. Tested for `WaitQuiet` only; the swap pause itself is still unmeasured.
+"Row copy complete", zdm polls `performance_schema.metadata_locks` (joined to `threads` and `innodb_trx`,
+`preflight.WaitQuiet`) and removes the flag only when no holder on the table is older than the plan's
+`lock_timeout_seconds`. Young holders are ignored: they finish before the swap's lock timeout. Long
+autocommit SELECTs are caught too, because the age is the larger of the transaction age and the
+processlist time. The wait is unbounded (stop with Ctrl-C). pt-osc has no equivalent and relies on
+`lock_wait_timeout`. Measured in `08-cutover-pause.md`.
 
-**Not done** (do not claim production readiness): warning when `innodb_online_alter_log_max_size` is small for the write rate (needs a write-rate estimate); write latency and swap pause measurements; Cloud SQL spikes S1-S4, S6, S7 (need a real instance);
+Defaults are now `lock_timeout_seconds: 1`, `max_attempts: 10` (gh-ost's `--default-retries` also governs
+copy retries; its own default is 60). A zdm-owned bounded cut-over was **not** built: gh-ost owns the
+cut-over, and killing its waiting session would break it without reimplementing it.
+
+**Not done** (do not claim production readiness): warning when `innodb_online_alter_log_max_size` is small for the write rate (needs a write-rate estimate, and zdm has no INPLACE path yet); Cloud SQL spikes S1-S4, S6, S7 (need a real instance);
 failure injection for binlog purge, failover or promotion, full disk; live-table verification; lint
 rules that need live facts (row counts, replica state); zdm's own forward cut-over; goreleaser config;
 the CI integration matrix has never run (it only runs on GitHub); no remote repository yet; name clash

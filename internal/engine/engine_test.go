@@ -47,7 +47,7 @@ func TestBuildExecuteAndOptions(t *testing.T) {
 	if slices.Contains(dry.Args, "--execute") {
 		t.Error("dry run must not pass --execute")
 	}
-	for _, want := range []string{"--assume-master-host=primary", "--skip-port-validation", "--cut-over-lock-timeout-seconds=2"} {
+	for _, want := range []string{"--assume-master-host=primary", "--skip-port-validation", "--cut-over-lock-timeout-seconds=1"} {
 		if !slices.Contains(dry.Args, want) {
 			t.Errorf("missing %s in %v", want, dry.Args)
 		}
@@ -79,7 +79,7 @@ func TestBuildExecuteAndOptions(t *testing.T) {
 	if !slices.Contains(pt.Args, "--recursion-method=none") || !slices.ContainsFunc(pt.Args, func(a string) bool { return strings.HasPrefix(a, "--check-replica-lag=h=replica,P=3307,F=") }) {
 		t.Errorf("pt-osc replica args: %v", pt.Args)
 	}
-	if !slices.Contains(pt.Args, "--dry-run") || !slices.Contains(pt.Args, "--set-vars=lock_wait_timeout=2") || !slices.Contains(pt.Args, "h=127.0.0.1,P=3306,D=app,t=t") {
+	if !slices.Contains(pt.Args, "--dry-run") || !slices.Contains(pt.Args, "--set-vars=lock_wait_timeout=1") || !slices.Contains(pt.Args, "h=127.0.0.1,P=3306,D=app,t=t") {
 		t.Errorf("pt-osc args: %v", pt.Args)
 	}
 }

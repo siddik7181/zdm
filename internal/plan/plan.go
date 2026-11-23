@@ -44,7 +44,7 @@ type Plan struct {
 func Default(schema, table, alter, engine string) Plan {
 	return Plan{
 		Version: 1, Schema: schema, Table: table, Alter: alter, Engine: engine,
-		Cutover:      Cutover{LockTimeoutSeconds: 2, MaxAttempts: 20, MaxLagSeconds: 2},
+		Cutover:      Cutover{LockTimeoutSeconds: 1, MaxAttempts: 10, MaxLagSeconds: 2},
 		StallTimeout: "5m", KeepOldTable: true,
 	}
 }

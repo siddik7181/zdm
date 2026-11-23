@@ -60,8 +60,8 @@ Invariants:
 
 ```yaml
 cutover:
-  lock_wait_timeout: 2s       # session-level, set at connect time (init command), not via a transaction-opening statement
-  max_attempts: 20
+  lock_wait_timeout: 1s       # session-level, set at connect time (init command), not via a transaction-opening statement
+  max_attempts: 10
   backoff: 5s
   deadline: 10m
   max_replica_lag: 2s

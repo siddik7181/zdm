@@ -4,6 +4,7 @@ package preflight
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"testing"
 	"time"
@@ -79,48 +80,73 @@ func TestAgainstLab(t *testing.T) {
 	}
 }
 
-func TestWaitQuietBlocksUntilTxnEnds(t *testing.T) {
+func TestWaitQuietSeesMetadataLockHolders(t *testing.T) {
 	dsn := env(t, "ZDM_TEST_DSN")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
+	admin, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = admin.Close() }()
+	for _, q := range []string{
+		"DROP DATABASE IF EXISTS zdm_wq", "CREATE DATABASE zdm_wq",
+		"CREATE TABLE zdm_wq.t (id INT PRIMARY KEY)", "INSERT INTO zdm_wq.t VALUES (1)",
+	} {
+		if _, err := admin.ExecContext(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer func() { _, _ = admin.ExecContext(context.Background(), "DROP DATABASE zdm_wq") }()
 	db, _, err := Open(dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	holder, _, err := Open(dsn)
-	if err != nil {
+
+	if err := WaitQuiet(ctx, db, "zdm_wq", "t", 1, 100*time.Millisecond, func(Txn) { t.Error("nothing holds the table") }); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = holder.Close() }()
-	conn, err := holder.Conn(ctx)
+
+	// A transaction that read the table keeps its lock until it commits.
+	conn, err := admin.Conn(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = conn.Close() }()
-	if _, err := conn.ExecContext(ctx, "START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY"); err != nil {
-		t.Fatal(err)
+	for _, q := range []string{"START TRANSACTION", "SELECT * FROM zdm_wq.t"} {
+		if _, err := conn.ExecContext(ctx, q); err != nil {
+			t.Fatal(err)
+		}
 	}
 	time.Sleep(2 * time.Second)
-
 	waits := 0
 	release := time.AfterFunc(3*time.Second, func() { _, _ = conn.ExecContext(context.Background(), "COMMIT") })
 	defer release.Stop()
 	start := time.Now()
-	if err := WaitQuiet(ctx, db, 1, 500*time.Millisecond, func(Txn) { waits++ }); err != nil {
+	if err := WaitQuiet(ctx, db, "zdm_wq", "t", 1, 500*time.Millisecond, func(Txn) { waits++ }); err != nil {
 		t.Fatal(err)
 	}
-	if waits == 0 || time.Since(start) < 2*time.Second {
+	if waits == 0 || time.Since(start) < 500*time.Millisecond {
 		t.Errorf("returned while the transaction was open: waits=%d after %v", waits, time.Since(start))
 	}
 
-	cctx, ccancel := context.WithCancel(ctx)
-	if _, err := conn.ExecContext(ctx, "START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY"); err != nil {
+	// A long autocommit SELECT holds the lock too, and has no row in innodb_trx.
+	go func() { _, _ = admin.ExecContext(ctx, "SELECT SLEEP(4) FROM zdm_wq.t") }()
+	time.Sleep(2500 * time.Millisecond)
+	start = time.Now()
+	if err := WaitQuiet(ctx, db, "zdm_wq", "t", 1, 300*time.Millisecond, func(Txn) {}); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(2 * time.Second)
-	time.AfterFunc(time.Second, ccancel)
-	if err := WaitQuiet(cctx, db, 1, 200*time.Millisecond, func(Txn) {}); err == nil {
+	if time.Since(start) < 500*time.Millisecond {
+		t.Errorf("a running SELECT must hold the swap back, waited %v", time.Since(start))
+	}
+
+	cctx, ccancel := context.WithCancel(ctx)
+	go func() { _, _ = admin.ExecContext(ctx, "SELECT SLEEP(4) FROM zdm_wq.t") }()
+	time.Sleep(2500 * time.Millisecond)
+	time.AfterFunc(500*time.Millisecond, ccancel)
+	if err := WaitQuiet(cctx, db, "zdm_wq", "t", 1, 100*time.Millisecond, func(Txn) {}); err == nil {
 		t.Error("a cancelled wait must return the context error")
 	}
 }
