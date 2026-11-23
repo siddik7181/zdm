@@ -16,6 +16,7 @@
 | D10 | Own binlog capture engine is optional and late | Learning goal and open-source goal both want it eventually |
 | D11 | Goals: learning **and** an open-source project | Changes priorities: adoption path, hygiene, trust |
 | D12 | Plan only until the Docker lab; docs kept in `docs/` | |
+| D13 | gh-ost cut-over is gated on `performance_schema.metadata_locks` holders (age above the lock timeout); defaults 1 s lock timeout, 10 attempts | gh-ost owns the cut-over, so zdm holds it with `--postpone-cut-over-flag-file` rather than building its own bounded cut-over (killing gh-ost's waiting session would break it). pt-osc has no gate. See `04-roadmap.md`, `08-cutover-pause.md` |
 
 ## 2. Positioning (honest)
 
