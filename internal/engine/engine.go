@@ -31,6 +31,9 @@ type Conn struct {
 	ReplicaPort int
 	// BehindProxy skips gh-ost's port check, needed with Docker port mapping or proxies.
 	BehindProxy bool
+	// PostponeFlag is a path gh-ost creates and keeps until it is removed; while it exists gh-ost
+	// finishes the copy but holds back the cut-over, so the caller picks the moment.
+	PostponeFlag string
 	// Resume means an earlier attempt may have been killed; gh-ost then drops its own leftover
 	// ghost table and socket file instead of refusing to start.
 	Resume bool
@@ -95,6 +98,9 @@ func Build(p plan.Plan, c Conn, execute bool) (Spec, error) {
 		}
 		if c.BehindProxy {
 			args = append(args, "--skip-port-validation")
+		}
+		if c.PostponeFlag != "" {
+			args = append(args, "--postpone-cut-over-flag-file="+c.PostponeFlag)
 		}
 		if c.Resume {
 			args = append(args, "--initially-drop-ghost-table", "--initially-drop-socket-file")

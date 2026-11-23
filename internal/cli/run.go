@@ -6,11 +6,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -123,6 +126,9 @@ func connFromDSN(dsn string) (engine.Conn, error) {
 	return engine.Conn{Host: host, Port: port, User: cfg.User, Password: cfg.Passwd}, nil
 }
 
+// longTxnSeconds is the age past which an open transaction counts as able to block the swap.
+const longTxnSeconds = 60
+
 func runCmd(args []string, s Streams) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(s.Err)
@@ -187,12 +193,28 @@ func runCmd(args []string, s Streams) int {
 		state.Preflight: func(ctx context.Context) error { return runPreflight(ctx, primary, replicas, p) },
 		state.Migrate: func(ctx context.Context) error {
 			conn.Resume = resumed
+			onLine := func(l string) { fmt.Fprintln(s.Out, "  | "+l) }
+			if p.Engine == plan.GhOst {
+				dir, err := os.MkdirTemp("", "zdm-gate-")
+				if err != nil {
+					return err
+				}
+				defer func() { _ = os.RemoveAll(dir) }()
+				conn.PostponeFlag = filepath.Join(dir, "postpone")
+				var once sync.Once
+				onLine = func(l string) {
+					fmt.Fprintln(s.Out, "  | "+l)
+					if strings.Contains(l, "Row copy complete") {
+						once.Do(func() { go openGate(ctx, primary, conn.PostponeFlag, s.Out) })
+					}
+				}
+			}
 			spec, err := engine.Build(p, conn, true)
 			if err != nil {
 				return err
 			}
 			defer spec.Cleanup()
-			return engine.Run(ctx, spec, p.Stall(), func(l string) { fmt.Fprintln(s.Out, "  | "+l) })
+			return engine.Run(ctx, spec, p.Stall(), onLine)
 		},
 		state.Verify: func(ctx context.Context) error { return runner.PostCheck(ctx, primary, p) },
 	}
@@ -236,12 +258,12 @@ func dryRun(ctx context.Context, s Streams, steps runner.Steps, p plan.Plan, con
 }
 
 func runPreflight(ctx context.Context, primary *sql.DB, replicas []preflight.Replica, p plan.Plan) error {
-	facts, err := preflight.Gather(ctx, primary, replicas, 60)
+	facts, err := preflight.Gather(ctx, primary, replicas, longTxnSeconds)
 	if err != nil {
 		return err
 	}
 	var failed []string
-	for _, r := range preflight.Evaluate(facts, preflight.Options{MaxLagSeconds: 10, LongTxnSeconds: 60}) {
+	for _, r := range preflight.Evaluate(facts, preflight.Options{MaxLagSeconds: 10, LongTxnSeconds: longTxnSeconds}) {
 		if r.Status == preflight.Fail {
 			failed = append(failed, r.Check+": "+r.Detail)
 		}
@@ -257,4 +279,19 @@ func runPreflight(ctx context.Context, primary *sql.DB, replicas []preflight.Rep
 		return fmt.Errorf("plan engine %s is not safe for this table: %s", p.Engine, strings.Join(c.Reasons, "; "))
 	}
 	return nil
+}
+
+// openGate lets gh-ost cut over once no long transaction could hold the swap back. If the check
+// itself fails, the cut-over is still released: gh-ost's own lock timeout bounds the damage.
+func openGate(ctx context.Context, db *sql.DB, flag string, out io.Writer) {
+	err := preflight.WaitQuiet(ctx, db, longTxnSeconds, 5*time.Second, func(t preflight.Txn) {
+		fmt.Fprintf(out, "cut-over held: transaction %s open %ds\n", t.ID, t.AgeSeconds)
+	})
+	if err != nil && ctx.Err() != nil {
+		return
+	}
+	if err != nil {
+		fmt.Fprintf(out, "zdm: %v; releasing cut-over anyway\n", err)
+	}
+	_ = os.Remove(flag) //nolint:gosec // flag is the temp path zdm itself chose
 }
