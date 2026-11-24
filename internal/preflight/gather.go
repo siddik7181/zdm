@@ -5,6 +5,7 @@ package preflight
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -15,6 +16,9 @@ import (
 type Txn struct {
 	ID         string
 	AgeSeconds int64
+	// SafeToKill is true only for a session that is idle inside a transaction that has written nothing,
+	// so ending it loses no data. A session with unknown state is never safe.
+	SafeToKill bool
 }
 
 // ReplicaFacts is what one gating replica reported.
@@ -167,7 +171,9 @@ func ReadReplica(ctx context.Context, addr string, db *sql.DB) ReplicaFacts {
 func holders(ctx context.Context, db *sql.DB, schema, table string, seconds int) ([]Txn, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT th.PROCESSLIST_ID,
-		        GREATEST(COALESCE(TIMESTAMPDIFF(SECOND, trx.trx_started, NOW()), 0), COALESCE(th.PROCESSLIST_TIME, 0)) AS age
+		        GREATEST(COALESCE(TIMESTAMPDIFF(SECOND, trx.trx_started, NOW()), 0), COALESCE(th.PROCESSLIST_TIME, 0)) AS age,
+		        MAX(th.PROCESSLIST_COMMAND = 'Sleep' AND trx.trx_id IS NOT NULL AND trx.trx_rows_modified = 0
+		            AND th.PROCESSLIST_USER <> 'system user') AS safe
 		 FROM performance_schema.metadata_locks ml
 		 JOIN performance_schema.threads th ON th.THREAD_ID = ml.OWNER_THREAD_ID
 		 LEFT JOIN information_schema.innodb_trx trx ON trx.trx_mysql_thread_id = th.PROCESSLIST_ID
@@ -184,32 +190,60 @@ func holders(ctx context.Context, db *sql.DB, schema, table string, seconds int)
 	for rows.Next() {
 		var id int64
 		var t Txn
-		if err := rows.Scan(&id, &t.AgeSeconds); err != nil {
+		var safe sql.NullBool
+		if err := rows.Scan(&id, &t.AgeSeconds, &safe); err != nil {
 			return nil, err
 		}
-		t.ID = fmt.Sprint(id)
+		t.ID, t.SafeToKill = fmt.Sprint(id), safe.Valid && safe.Bool
 		out = append(out, t)
 	}
 	return out, rows.Err()
 }
 
-// WaitQuiet blocks until no session has held a metadata lock on the table for seconds or more, so
-// a cut-over does not queue behind it. onWait is called with the oldest holder on every poll that
-// finds one. It returns early with the context's error.
-func WaitQuiet(ctx context.Context, db *sql.DB, schema, table string, seconds int, poll time.Duration, onWait func(Txn)) error {
+// ErrGateTimeout means holders were still on the table when the gate's deadline passed.
+var ErrGateTimeout = errors.New("metadata-lock holders still on the table at the gate deadline")
+
+// Gate says when a cut-over may start and what to do about holders that are in the way.
+type Gate struct {
+	Seconds   int           // a holder at least this old blocks the swap
+	Poll      time.Duration // how often to look
+	MaxWait   time.Duration // zero waits forever
+	KillAfter time.Duration // zero never kills; otherwise ends safe holders at least this old
+	OnWait    func(Txn)     // called with the oldest holder on every poll that finds one
+	OnKill    func(Txn, error)
+}
+
+// WaitQuiet blocks until no session has held a metadata lock on the table for g.Seconds or more, so
+// a cut-over does not queue behind it. It returns early with the context's error, or ErrGateTimeout.
+// With KillAfter set it ends only holders that are idle in a transaction that has written nothing.
+func WaitQuiet(ctx context.Context, db *sql.DB, schema, table string, g Gate) error {
+	deadline := time.Now().Add(g.MaxWait)
 	for {
-		hs, err := holders(ctx, db, schema, table, seconds)
+		hs, err := holders(ctx, db, schema, table, g.Seconds)
 		if err != nil {
 			return fmt.Errorf("check metadata locks: %w", err)
 		}
 		if len(hs) == 0 {
 			return nil
 		}
-		onWait(hs[0])
+		g.OnWait(hs[0])
+		if g.KillAfter > 0 {
+			for _, h := range hs {
+				if h.SafeToKill && time.Duration(h.AgeSeconds)*time.Second >= g.KillAfter {
+					_, kerr := db.ExecContext(ctx, "KILL "+h.ID)
+					if g.OnKill != nil {
+						g.OnKill(h, kerr)
+					}
+				}
+			}
+		}
+		if g.MaxWait > 0 && time.Now().Add(g.Poll).After(deadline) {
+			return ErrGateTimeout
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(poll):
+		case <-time.After(g.Poll):
 		}
 	}
 }

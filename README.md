@@ -49,8 +49,10 @@ are left, and the old table is kept (or dropped) as the plan says. It does **not
 transaction or long SELECT, read from `performance_schema.metadata_locks`) is older than the plan's
 `lock_timeout_seconds` (default 1 s), then lets gh-ost swap. A swap that still can't get the lock is retried
 up to `max_attempts` (default 10), each attempt stalling writes for at most the lock timeout, with an exponential
-wait between attempts (`backoff_seconds` 1 doubling to `max_backoff_seconds` 30; jittered for zdm's own retries, not for gh-ost's). The wait has no
-deadline; Ctrl-C stops it. pt-osc has no gate: a long open transaction makes it hit `lock_wait_timeout`, stall
+wait between attempts (`backoff_seconds` 1 doubling to `max_backoff_seconds` 30; jittered for zdm's own retries, not for gh-ost's). The wait ends after
+`gate_max_wait_seconds` (default 900): the run stops with the table unchanged. Optionally
+`kill_idle_after_seconds` ends holders idle in a read-only transaction; one that has written rows is never ended.
+Ctrl-C also stops the wait. pt-osc has no gate: a long open transaction makes it hit `lock_wait_timeout`, stall
 writes and fail with the table unchanged. Lab numbers and limits: `docs/08-cutover-pause.md`.
 ```
 zdm verify plan.json                                   # checksum the new table against the old one

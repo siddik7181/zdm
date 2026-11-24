@@ -87,6 +87,15 @@ Defaults are now `lock_timeout_seconds: 1`, `max_attempts: 10` (gh-ost's `--defa
 copy retries; its own default is 60). A zdm-owned bounded cut-over was **not** built: gh-ost owns the
 cut-over, and killing its waiting session would break it without reimplementing it.
 
+**Gate deadline and safe kill.** `gate_max_wait_seconds` (default 900; 0 waits forever) stops the run when holders
+outlast it: the cut-over is never released, gh-ost is stopped, the table is unchanged and `zdm cleanup`
+removes the shadow table. `kill_idle_after_seconds` (default 0 = off) ends holders that are idle in a
+transaction that has **written nothing** (`trx_rows_modified = 0`, command `Sleep`) and are at least that old.
+A session that wrote rows, is running a query, or whose state is unknown is never ended, because ending it
+would discard its writes. Residual risk: a read-only transaction that is ended makes the application's next
+statement on that connection fail (it reconnects or errors); nothing is corrupted. Tested against MySQL 8.4
+(writer survives, idle reader ended, deadline fires); not tested against a real gh-ost run.
+
 **Retry backoff.** The plan has `backoff_seconds` (default 1) and `max_backoff_seconds` (default 30). The wait
 between failed swap attempts doubles from the first up to the second. zdm's own retries (`rollback`) wait
 half the doubled value plus a random share of the other half, so concurrent retriers spread out. gh-ost gets
