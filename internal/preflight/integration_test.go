@@ -5,6 +5,7 @@ package preflight
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -104,7 +105,7 @@ func TestWaitQuietSeesMetadataLockHolders(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 
-	if err := WaitQuiet(ctx, db, "zdm_wq", "t", 1, 100*time.Millisecond, func(Txn) { t.Error("nothing holds the table") }); err != nil {
+	if err := WaitQuiet(ctx, db, "zdm_wq", "t", Gate{Seconds: 1, Poll: 100 * time.Millisecond, OnWait: func(Txn) { t.Error("nothing holds the table") }}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -124,7 +125,7 @@ func TestWaitQuietSeesMetadataLockHolders(t *testing.T) {
 	release := time.AfterFunc(3*time.Second, func() { _, _ = conn.ExecContext(context.Background(), "COMMIT") })
 	defer release.Stop()
 	start := time.Now()
-	if err := WaitQuiet(ctx, db, "zdm_wq", "t", 1, 500*time.Millisecond, func(Txn) { waits++ }); err != nil {
+	if err := WaitQuiet(ctx, db, "zdm_wq", "t", Gate{Seconds: 1, Poll: 500 * time.Millisecond, OnWait: func(Txn) { waits++ }}); err != nil {
 		t.Fatal(err)
 	}
 	if waits == 0 || time.Since(start) < 500*time.Millisecond {
@@ -135,7 +136,7 @@ func TestWaitQuietSeesMetadataLockHolders(t *testing.T) {
 	go func() { _, _ = admin.ExecContext(ctx, "SELECT SLEEP(4) FROM zdm_wq.t") }()
 	time.Sleep(2500 * time.Millisecond)
 	start = time.Now()
-	if err := WaitQuiet(ctx, db, "zdm_wq", "t", 1, 300*time.Millisecond, func(Txn) {}); err != nil {
+	if err := WaitQuiet(ctx, db, "zdm_wq", "t", Gate{Seconds: 1, Poll: 300 * time.Millisecond, OnWait: func(Txn) {}}); err != nil {
 		t.Fatal(err)
 	}
 	if time.Since(start) < 500*time.Millisecond {
@@ -146,7 +147,83 @@ func TestWaitQuietSeesMetadataLockHolders(t *testing.T) {
 	go func() { _, _ = admin.ExecContext(ctx, "SELECT SLEEP(4) FROM zdm_wq.t") }()
 	time.Sleep(2500 * time.Millisecond)
 	time.AfterFunc(500*time.Millisecond, ccancel)
-	if err := WaitQuiet(cctx, db, "zdm_wq", "t", 1, 100*time.Millisecond, func(Txn) {}); err == nil {
+	if err := WaitQuiet(cctx, db, "zdm_wq", "t", Gate{Seconds: 1, Poll: 100 * time.Millisecond, OnWait: func(Txn) {}}); err == nil {
 		t.Error("a cancelled wait must return the context error")
+	}
+}
+
+func TestGateKillsOnlyIdleReadOnlyHoldersAndHonoursDeadline(t *testing.T) {
+	dsn := env(t, "ZDM_TEST_DSN")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	admin, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = admin.Close() }()
+	for _, q := range []string{
+		"DROP DATABASE IF EXISTS zdm_gk", "CREATE DATABASE zdm_gk",
+		"CREATE TABLE zdm_gk.t (id INT PRIMARY KEY, v INT)", "INSERT INTO zdm_gk.t VALUES (1, 0)",
+	} {
+		if _, err := admin.ExecContext(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer func() { _, _ = admin.ExecContext(context.Background(), "DROP DATABASE zdm_gk") }()
+	db, _, err := Open(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+
+	hold := func(qs ...string) *sql.Conn {
+		c, err := admin.Conn(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, q := range qs {
+			if _, err := c.ExecContext(ctx, q); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return c
+	}
+	alive := func(c *sql.Conn) bool { return c.PingContext(ctx) == nil }
+
+	// An idle transaction that wrote a row must survive the gate: ending it would discard that write.
+	writer := hold("START TRANSACTION", "UPDATE zdm_gk.t SET v = 1 WHERE id = 1")
+	defer func() { _ = writer.Close() }()
+	time.Sleep(2 * time.Second)
+	kills := 0
+	err = WaitQuiet(ctx, db, "zdm_gk", "t", Gate{
+		Seconds: 1, Poll: 200 * time.Millisecond, MaxWait: 3 * time.Second, KillAfter: time.Second,
+		OnWait: func(Txn) {}, OnKill: func(Txn, error) { kills++ },
+	})
+	if !errors.Is(err, ErrGateTimeout) || kills != 0 || !alive(writer) {
+		t.Fatalf("writer must not be killed and the deadline must fire: err=%v kills=%d alive=%v", err, kills, alive(writer))
+	}
+	if _, err := writer.ExecContext(ctx, "ROLLBACK"); err != nil {
+		t.Fatal(err)
+	}
+
+	// An idle read-only transaction is ended, which frees the gate.
+	reader := hold("START TRANSACTION", "SELECT * FROM zdm_gk.t")
+	defer func() { _ = reader.Close() }()
+	time.Sleep(2 * time.Second)
+	err = WaitQuiet(ctx, db, "zdm_gk", "t", Gate{
+		Seconds: 1, Poll: 200 * time.Millisecond, MaxWait: 10 * time.Second, KillAfter: time.Second,
+		OnWait: func(Txn) {}, OnKill: func(Txn, error) { kills++ },
+	})
+	if err != nil || kills == 0 || alive(reader) {
+		t.Fatalf("idle reader should be ended: err=%v kills=%d alive=%v", err, kills, alive(reader))
+	}
+
+	// Kill disabled: the reader is left alone and the deadline fires.
+	reader2 := hold("START TRANSACTION", "SELECT * FROM zdm_gk.t")
+	defer func() { _, _ = reader2.ExecContext(context.Background(), "ROLLBACK"); _ = reader2.Close() }()
+	time.Sleep(2 * time.Second)
+	err = WaitQuiet(ctx, db, "zdm_gk", "t", Gate{Seconds: 1, Poll: 200 * time.Millisecond, MaxWait: 2 * time.Second, OnWait: func(Txn) {}})
+	if !errors.Is(err, ErrGateTimeout) || !alive(reader2) {
+		t.Fatalf("without KillAfter nothing is ended: err=%v alive=%v", err, alive(reader2))
 	}
 }

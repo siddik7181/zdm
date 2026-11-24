@@ -192,9 +192,11 @@ func runCmd(args []string, s Streams) int {
 	steps := runner.Steps{
 		state.Preflight: func(ctx context.Context) error { return runPreflight(ctx, primary, replicas, p) },
 		state.Migrate: func(ctx context.Context) error {
+			var gateErr chan error
 			conn.Resume = resumed
 			onLine := func(l string) { fmt.Fprintln(s.Out, "  | "+l) }
 			if p.Engine == plan.GhOst {
+				gateErr = make(chan error, 1)
 				dir, err := os.MkdirTemp("", "zdm-gate-")
 				if err != nil {
 					return err
@@ -202,10 +204,12 @@ func runCmd(args []string, s Streams) int {
 				defer func() { _ = os.RemoveAll(dir) }()
 				conn.PostponeFlag = filepath.Join(dir, "postpone")
 				var once sync.Once
+				ctx, cancel := context.WithCancel(ctx)
+				defer cancel()
 				onLine = func(l string) {
 					fmt.Fprintln(s.Out, "  | "+l)
 					if strings.Contains(l, "Row copy complete") {
-						once.Do(func() { go openGate(ctx, primary, p, conn.PostponeFlag, s.Out) })
+						once.Do(func() { go func() { gateErr <- openGate(ctx, primary, p, conn.PostponeFlag, s.Out, cancel) }() })
 					}
 				}
 			}
@@ -214,7 +218,15 @@ func runCmd(args []string, s Streams) int {
 				return err
 			}
 			defer spec.Cleanup()
-			return engine.Run(ctx, spec, p.Stall(), onLine)
+			err = engine.Run(ctx, spec, p.Stall(), onLine)
+			select {
+			case ge := <-gateErr:
+				if ge != nil {
+					return ge
+				}
+			default:
+			}
+			return err
 		},
 		state.Verify: func(ctx context.Context) error { return runner.PostCheck(ctx, primary, p) },
 	}
@@ -282,17 +294,35 @@ func runPreflight(ctx context.Context, primary *sql.DB, replicas []preflight.Rep
 }
 
 // openGate lets gh-ost cut over once no long transaction could hold the swap back. If the check
-// itself fails, the cut-over is still released: gh-ost's own lock timeout bounds the damage.
-func openGate(ctx context.Context, db *sql.DB, p plan.Plan, flag string, out io.Writer) {
-	// A holder older than the lock timeout would make the swap attempt fail, so that is the bar.
-	err := preflight.WaitQuiet(ctx, db, p.Schema, p.Table, p.Cutover.LockTimeoutSeconds, 5*time.Second, func(t preflight.Txn) {
-		fmt.Fprintf(out, "cut-over held: session %s has held a lock on the table for %ds\n", t.ID, t.AgeSeconds)
+// itself fails, the cut-over is still released: gh-ost's own lock timeout bounds the damage. If holders
+// outlast the plan's deadline it stops the run instead, which leaves the table untouched.
+func openGate(ctx context.Context, db *sql.DB, p plan.Plan, flag string, out io.Writer, stopRun func()) error {
+	c := p.Cutover
+	err := preflight.WaitQuiet(ctx, db, p.Schema, p.Table, preflight.Gate{
+		// A holder older than the lock timeout would make the swap attempt fail, so that is the bar.
+		Seconds: c.LockTimeoutSeconds, Poll: 5 * time.Second,
+		MaxWait:   time.Duration(c.GateMaxWaitSeconds) * time.Second,
+		KillAfter: time.Duration(c.KillIdleAfterSeconds) * time.Second,
+		OnWait: func(t preflight.Txn) {
+			fmt.Fprintf(out, "cut-over held: session %s has held a lock on the table for %ds\n", t.ID, t.AgeSeconds)
+		},
+		OnKill: func(t preflight.Txn, err error) {
+			if err != nil {
+				fmt.Fprintf(out, "zdm: could not end idle read-only session %s: %v\n", t.ID, err)
+				return
+			}
+			fmt.Fprintf(out, "zdm: ended session %s (idle in a read-only transaction for %ds, nothing written)\n", t.ID, t.AgeSeconds)
+		},
 	})
-	if err != nil && ctx.Err() != nil {
-		return
-	}
-	if err != nil {
+	switch {
+	case errors.Is(err, preflight.ErrGateTimeout):
+		stopRun()
+		return fmt.Errorf("cut-over not started: %w after %ds; the table is unchanged, run zdm cleanup to remove the shadow table", err, c.GateMaxWaitSeconds)
+	case err != nil && ctx.Err() != nil:
+		return nil
+	case err != nil:
 		fmt.Fprintf(out, "zdm: %v; releasing cut-over anyway\n", err)
 	}
 	_ = os.Remove(flag) //nolint:gosec // flag is the temp path zdm itself chose
+	return nil
 }
