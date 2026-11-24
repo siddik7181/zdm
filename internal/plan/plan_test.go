@@ -21,6 +21,8 @@ func TestValidate(t *testing.T) {
 		"bad engine":         func(p *Plan) { p.Engine = "magic" },
 		"lock too long":      func(p *Plan) { p.Cutover.LockTimeoutSeconds = 60 },
 		"no attempts":        func(p *Plan) { p.Cutover.MaxAttempts = 0 },
+		"no backoff":         func(p *Plan) { p.Cutover.BackoffSeconds = 0 },
+		"max below base":     func(p *Plan) { p.Cutover.BackoffSeconds, p.Cutover.MaxBackoffSeconds = 8, 4 },
 		"tiny stall":         func(p *Plan) { p.StallTimeout = "1s" },
 		"garbage stall":      func(p *Plan) { p.StallTimeout = "soon" },
 		"version":            func(p *Plan) { p.Version = 2 },

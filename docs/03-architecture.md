@@ -62,7 +62,7 @@ Invariants:
 cutover:
   lock_wait_timeout: 1s       # session-level, set at connect time (init command), not via a transaction-opening statement
   max_attempts: 10
-  backoff: 5s
+  backoff: 1s                 # plan: backoff_seconds; doubles per failed attempt up to max_backoff (30s)
   deadline: 10m
   max_replica_lag: 2s
   gating_replicas: [a1, b1]   # configured by hand; non-gating replicas are reported, not waited on

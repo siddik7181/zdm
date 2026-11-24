@@ -87,6 +87,13 @@ Defaults are now `lock_timeout_seconds: 1`, `max_attempts: 10` (gh-ost's `--defa
 copy retries; its own default is 60). A zdm-owned bounded cut-over was **not** built: gh-ost owns the
 cut-over, and killing its waiting session would break it without reimplementing it.
 
+**Retry backoff.** The plan has `backoff_seconds` (default 1) and `max_backoff_seconds` (default 30). The wait
+between failed swap attempts doubles from the first up to the second. zdm's own retries (`rollback`) wait
+half the doubled value plus a random share of the other half, so concurrent retriers spread out. gh-ost gets
+`--cut-over-exponential-backoff` and `--exponential-backoff-max-interval`; it has no jitter, and its own base
+interval is not configurable. Older plan files without these fields load with the defaults. Untested against
+a real gh-ost swap retry.
+
 **Not done** (do not claim production readiness): warning when `innodb_online_alter_log_max_size` is small for the write rate (needs a write-rate estimate, and zdm has no INPLACE path yet); Cloud SQL spikes S1-S4, S6, S7 (need a real instance);
 failure injection for binlog purge, failover or promotion, full disk; live-table verification; lint
 rules that need live facts (row counts, replica state); zdm's own forward cut-over; goreleaser config;

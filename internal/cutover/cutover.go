@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -112,10 +113,23 @@ func Rollback(ctx context.Context, db *sql.DB, p plan.Plan, sleep func(context.C
 		if !retryable(err) || attempt >= p.Cutover.MaxAttempts {
 			return fmt.Errorf("rename (attempt %d of %d): %w", attempt, p.Cutover.MaxAttempts, err)
 		}
-		if err := sleep(ctx, time.Duration(attempt)*time.Second); err != nil {
+		//nolint:gosec // jitter, not security
+		if err := sleep(ctx, Backoff(p.Cutover, attempt, rand.Float64())); err != nil {
 			return err
 		}
 	}
+}
+
+// Backoff is the wait after the given failed attempt (1-based): base doubling up to the cap, then
+// half fixed and half scaled by r in [0,1) so concurrent retriers spread out but never wait zero.
+func Backoff(c plan.Cutover, attempt int, r float64) time.Duration {
+	d := time.Duration(c.BackoffSeconds) * time.Second
+	limit := time.Duration(c.MaxBackoffSeconds) * time.Second
+	for i := 1; i < attempt && d < limit; i++ {
+		d *= 2
+	}
+	d = min(d, limit)
+	return d/2 + time.Duration(float64(d/2)*r)
 }
 
 // Sleep waits for d or until the context ends.

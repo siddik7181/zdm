@@ -23,7 +23,11 @@ const (
 type Cutover struct {
 	LockTimeoutSeconds int `json:"lock_timeout_seconds"` // per attempt; the table is blocked at most this long
 	MaxAttempts        int `json:"max_attempts"`
-	MaxLagSeconds      int `json:"max_lag_seconds"` // gating replicas must be under this to swap
+	// BackoffSeconds and MaxBackoffSeconds shape the wait between failed swap attempts: it doubles from
+	// the first up to the second. zdm's own retries (rollback) add jitter; gh-ost's have none.
+	BackoffSeconds    int `json:"backoff_seconds"`
+	MaxBackoffSeconds int `json:"max_backoff_seconds"`
+	MaxLagSeconds     int `json:"max_lag_seconds"` // gating replicas must be under this to swap
 }
 
 // Plan is a reviewed, reproducible description of one schema change.
@@ -44,7 +48,7 @@ type Plan struct {
 func Default(schema, table, alter, engine string) Plan {
 	return Plan{
 		Version: 1, Schema: schema, Table: table, Alter: alter, Engine: engine,
-		Cutover:      Cutover{LockTimeoutSeconds: 1, MaxAttempts: 10, MaxLagSeconds: 2},
+		Cutover:      Cutover{LockTimeoutSeconds: 1, MaxAttempts: 10, BackoffSeconds: 1, MaxBackoffSeconds: 30, MaxLagSeconds: 2},
 		StallTimeout: "5m", KeepOldTable: true,
 	}
 }
@@ -66,8 +70,9 @@ func (p Plan) Validate() error {
 	if p.Engine != GhOst && p.Engine != PtOsc {
 		errs = append(errs, fmt.Errorf("engine must be %q or %q", GhOst, PtOsc))
 	}
-	if c := p.Cutover; c.LockTimeoutSeconds < 1 || c.LockTimeoutSeconds > 10 || c.MaxAttempts < 1 || c.MaxLagSeconds < 0 {
-		errs = append(errs, errors.New("cutover: lock_timeout_seconds must be 1-10, max_attempts >= 1, max_lag_seconds >= 0"))
+	if c := p.Cutover; c.LockTimeoutSeconds < 1 || c.LockTimeoutSeconds > 10 || c.MaxAttempts < 1 || c.MaxLagSeconds < 0 ||
+		c.BackoffSeconds < 1 || c.MaxBackoffSeconds < c.BackoffSeconds {
+		errs = append(errs, errors.New("cutover: lock_timeout_seconds must be 1-10, max_attempts >= 1, max_lag_seconds >= 0, backoff_seconds >= 1, max_backoff_seconds >= backoff_seconds"))
 	}
 	if d, err := time.ParseDuration(p.StallTimeout); err != nil || d < 10*time.Second {
 		errs = append(errs, errors.New("stall_timeout must be a duration of at least 10s"))
@@ -113,7 +118,8 @@ func Load(path string) (Plan, error) {
 	}
 	dec := json.NewDecoder(strings.NewReader(string(b)))
 	dec.DisallowUnknownFields()
-	var p Plan
+	// Plans written before the backoff fields existed keep working with the defaults.
+	p := Plan{Cutover: Cutover{BackoffSeconds: 1, MaxBackoffSeconds: 30}}
 	if err := dec.Decode(&p); err != nil {
 		return Plan{}, fmt.Errorf("parse %s: %w", path, err)
 	}

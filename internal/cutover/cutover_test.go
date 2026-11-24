@@ -38,3 +38,24 @@ func TestSleepStopsOnCancel(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestBackoffDoublesCapsAndJitters(t *testing.T) {
+	c := plan.Cutover{BackoffSeconds: 1, MaxBackoffSeconds: 8}
+	cases := []struct {
+		attempt int
+		r       float64
+		want    time.Duration
+	}{
+		{1, 0, 500 * time.Millisecond},
+		{1, 1, time.Second},
+		{3, 0, 2 * time.Second},
+		{3, 1, 4 * time.Second},
+		{10, 0, 4 * time.Second},
+		{10, 1, 8 * time.Second}, // capped at 8 s
+	}
+	for _, tc := range cases {
+		if got := Backoff(c, tc.attempt, tc.r); got != tc.want {
+			t.Errorf("attempt %d r=%v: got %v want %v", tc.attempt, tc.r, got, tc.want)
+		}
+	}
+}
