@@ -47,7 +47,7 @@ func TestBuildExecuteAndOptions(t *testing.T) {
 	if slices.Contains(dry.Args, "--execute") {
 		t.Error("dry run must not pass --execute")
 	}
-	for _, want := range []string{"--assume-master-host=primary", "--skip-port-validation", "--cut-over-lock-timeout-seconds=1"} {
+	for _, want := range []string{"--assume-master-host=primary", "--skip-port-validation", "--cut-over-lock-timeout-seconds=1", "--cut-over-exponential-backoff", "--exponential-backoff-max-interval=30"} {
 		if !slices.Contains(dry.Args, want) {
 			t.Errorf("missing %s in %v", want, dry.Args)
 		}

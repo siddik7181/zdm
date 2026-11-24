@@ -90,6 +90,8 @@ func Build(p plan.Plan, c Conn, execute bool) (Spec, error) {
 			"--database=" + p.Schema, "--table=" + p.Table, "--alter=" + p.Alter,
 			"--cut-over-lock-timeout-seconds=" + strconv.Itoa(p.Cutover.LockTimeoutSeconds),
 			"--default-retries=" + strconv.Itoa(p.Cutover.MaxAttempts),
+			"--cut-over-exponential-backoff",
+			"--exponential-backoff-max-interval=" + strconv.Itoa(p.Cutover.MaxBackoffSeconds),
 			"--max-lag-millis=" + strconv.Itoa(p.Cutover.MaxLagSeconds*1000),
 			"--switch-to-rbr", "--verbose",
 		}

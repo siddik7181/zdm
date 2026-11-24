@@ -48,7 +48,8 @@ are left, and the old table is kept (or dropped) as the plan says. It does **not
 **Cut-over.** With gh-ost, zdm holds the swap after the row copy until no holder on the table (open
 transaction or long SELECT, read from `performance_schema.metadata_locks`) is older than the plan's
 `lock_timeout_seconds` (default 1 s), then lets gh-ost swap. A swap that still can't get the lock is retried
-up to `max_attempts` (default 10), each attempt stalling writes for at most the lock timeout. The wait has no
+up to `max_attempts` (default 10), each attempt stalling writes for at most the lock timeout, with an exponential
+wait between attempts (`backoff_seconds` 1 doubling to `max_backoff_seconds` 30; jittered for zdm's own retries, not for gh-ost's). The wait has no
 deadline; Ctrl-C stops it. pt-osc has no gate: a long open transaction makes it hit `lock_wait_timeout`, stall
 writes and fail with the table unchanged. Lab numbers and limits: `docs/08-cutover-pause.md`.
 ```
@@ -79,7 +80,7 @@ neither table is changing: after a live change, rows written since the swap are 
 The checksum is CRC32-based, so it catches corruption and missing rows, not a deliberate collision.
 
 `rollback` is one atomic `RENAME TABLE` under a `lock_wait_timeout` set at connect time (the plan's
-`lock_timeout_seconds`). A blocked attempt changes nothing and is retried up to `max_attempts`; the
+`lock_timeout_seconds`). A blocked attempt changes nothing and is retried up to `max_attempts` with jittered exponential backoff; the
 schema is inspected before each attempt, so re-running after a crash is safe. The rejected table is
 parked as `_<table>_rolled_back`, never dropped. Rows written since the change exist only in the
 parked table, hence the required flag. Both commands need write privileges.
