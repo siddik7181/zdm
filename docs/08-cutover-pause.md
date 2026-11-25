@@ -22,7 +22,7 @@ Insert latency, `run` phase. "Gate polls" is how often the metadata-lock gate fo
 
 - With a long holder, the gate kept gh-ost from asking for the swap until the holder ended (8 to 9
   polls, run time about the holder length). Both migrations completed.
-- pt-osc has no gate. With a 60 s open transaction it hit `lock_wait_timeout`, stalled writes (40 inserts
+- pt-osc had no gate when these rows were measured. With a 60 s open transaction it hit `lock_wait_timeout`, stalled writes (40 inserts
   over 500 ms), and aborted with "`lat`.`t` was not altered". The table was left unchanged, but the attempt failed.
 - Writes were never blocked for more than about 1 s in these runs.
 

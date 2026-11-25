@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -165,23 +166,36 @@ func ReadReplica(ctx context.Context, addr string, db *sql.DB) ReplicaFacts {
 	return r
 }
 
-// holders lists sessions that hold a metadata lock on the table and have held it for at least
-// seconds. A transaction that touched the table keeps its lock until it commits; a plain SELECT
-// keeps it while it runs, which innodb_trx does not show.
-func holders(ctx context.Context, db *sql.DB, schema, table string, seconds int) ([]Txn, error) {
-	rows, err := db.QueryContext(ctx,
-		`SELECT th.PROCESSLIST_ID,
+// TableRef names a table, possibly outside the schema being changed.
+type TableRef struct{ Schema, Name string }
+
+const qHolders = `SELECT th.PROCESSLIST_ID,
 		        GREATEST(COALESCE(TIMESTAMPDIFF(SECOND, trx.trx_started, NOW()), 0), COALESCE(th.PROCESSLIST_TIME, 0)) AS age,
 		        MAX(th.PROCESSLIST_COMMAND = 'Sleep' AND trx.trx_id IS NOT NULL AND trx.trx_rows_modified = 0
 		            AND th.PROCESSLIST_USER <> 'system user') AS safe
 		 FROM performance_schema.metadata_locks ml
 		 JOIN performance_schema.threads th ON th.THREAD_ID = ml.OWNER_THREAD_ID
 		 LEFT JOIN information_schema.innodb_trx trx ON trx.trx_mysql_thread_id = th.PROCESSLIST_ID
-		 WHERE ml.OBJECT_TYPE = 'TABLE' AND ml.OBJECT_SCHEMA = ? AND ml.OBJECT_NAME = ?
+		 WHERE ml.OBJECT_TYPE = 'TABLE' AND ({tables})
 		   AND ml.LOCK_STATUS = 'GRANTED' AND th.PROCESSLIST_ID IS NOT NULL
 		   AND th.PROCESSLIST_ID <> CONNECTION_ID()
-		 GROUP BY th.PROCESSLIST_ID, age HAVING age >= ? ORDER BY age DESC LIMIT 20`,
-		schema, table, seconds)
+		 GROUP BY th.PROCESSLIST_ID, age HAVING age >= ? ORDER BY age DESC LIMIT 20`
+
+// holders lists sessions that hold a metadata lock on any of the tables and have held it for at least
+// seconds. A transaction that touched the table keeps its lock until it commits; a plain SELECT
+// keeps it while it runs, which innodb_trx does not show.
+func holders(ctx context.Context, db *sql.DB, tables []TableRef, seconds int) ([]Txn, error) {
+	if len(tables) == 0 {
+		return nil, errors.New("no tables to check")
+	}
+	where, args := make([]string, len(tables)), make([]any, 0, 2*len(tables)+1)
+	for i, t := range tables {
+		where[i] = "(ml.OBJECT_SCHEMA = ? AND ml.OBJECT_NAME = ?)"
+		args = append(args, t.Schema, t.Name)
+	}
+	args = append(args, seconds)
+	query := strings.Replace(qHolders, "{tables}", strings.Join(where, " OR "), 1) // only fixed "?" placeholders
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -200,8 +214,8 @@ func holders(ctx context.Context, db *sql.DB, schema, table string, seconds int)
 	return out, rows.Err()
 }
 
-// ErrGateTimeout means holders were still on the table when the gate's deadline passed.
-var ErrGateTimeout = errors.New("metadata-lock holders still on the table at the gate deadline")
+// ErrGateTimeout means holders were still on the table or a child when the gate's deadline passed.
+var ErrGateTimeout = errors.New("metadata-lock holders still on the table or a child at the gate deadline")
 
 // Gate says when a cut-over may start and what to do about holders that are in the way.
 type Gate struct {
@@ -213,13 +227,13 @@ type Gate struct {
 	OnKill    func(Txn, error)
 }
 
-// WaitQuiet blocks until no session has held a metadata lock on the table for g.Seconds or more, so
+// WaitQuiet blocks until no session has held a metadata lock on the table or a child for g.Seconds or more, so
 // a cut-over does not queue behind it. It returns early with the context's error, or ErrGateTimeout.
 // With KillAfter set it ends only holders that are idle in a transaction that has written nothing.
-func WaitQuiet(ctx context.Context, db *sql.DB, schema, table string, g Gate) error {
+func WaitQuiet(ctx context.Context, db *sql.DB, tables []TableRef, g Gate) error {
 	deadline := time.Now().Add(g.MaxWait)
 	for {
-		hs, err := holders(ctx, db, schema, table, g.Seconds)
+		hs, err := holders(ctx, db, tables, g.Seconds)
 		if err != nil {
 			return fmt.Errorf("check metadata locks: %w", err)
 		}

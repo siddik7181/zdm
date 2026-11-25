@@ -81,6 +81,8 @@ func TestAgainstLab(t *testing.T) {
 	}
 }
 
+var wq = []TableRef{{"zdm_wq", "t"}}
+
 func TestWaitQuietSeesMetadataLockHolders(t *testing.T) {
 	dsn := env(t, "ZDM_TEST_DSN")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -105,7 +107,7 @@ func TestWaitQuietSeesMetadataLockHolders(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 
-	if err := WaitQuiet(ctx, db, "zdm_wq", "t", Gate{Seconds: 1, Poll: 100 * time.Millisecond, OnWait: func(Txn) { t.Error("nothing holds the table") }}); err != nil {
+	if err := WaitQuiet(ctx, db, wq, Gate{Seconds: 1, Poll: 100 * time.Millisecond, OnWait: func(Txn) { t.Error("nothing holds the table") }}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -125,7 +127,7 @@ func TestWaitQuietSeesMetadataLockHolders(t *testing.T) {
 	release := time.AfterFunc(3*time.Second, func() { _, _ = conn.ExecContext(context.Background(), "COMMIT") })
 	defer release.Stop()
 	start := time.Now()
-	if err := WaitQuiet(ctx, db, "zdm_wq", "t", Gate{Seconds: 1, Poll: 500 * time.Millisecond, OnWait: func(Txn) { waits++ }}); err != nil {
+	if err := WaitQuiet(ctx, db, wq, Gate{Seconds: 1, Poll: 500 * time.Millisecond, OnWait: func(Txn) { waits++ }}); err != nil {
 		t.Fatal(err)
 	}
 	if waits == 0 || time.Since(start) < 500*time.Millisecond {
@@ -136,7 +138,7 @@ func TestWaitQuietSeesMetadataLockHolders(t *testing.T) {
 	go func() { _, _ = admin.ExecContext(ctx, "SELECT SLEEP(4) FROM zdm_wq.t") }()
 	time.Sleep(2500 * time.Millisecond)
 	start = time.Now()
-	if err := WaitQuiet(ctx, db, "zdm_wq", "t", Gate{Seconds: 1, Poll: 300 * time.Millisecond, OnWait: func(Txn) {}}); err != nil {
+	if err := WaitQuiet(ctx, db, wq, Gate{Seconds: 1, Poll: 300 * time.Millisecond, OnWait: func(Txn) {}}); err != nil {
 		t.Fatal(err)
 	}
 	if time.Since(start) < 500*time.Millisecond {
@@ -147,7 +149,7 @@ func TestWaitQuietSeesMetadataLockHolders(t *testing.T) {
 	go func() { _, _ = admin.ExecContext(ctx, "SELECT SLEEP(4) FROM zdm_wq.t") }()
 	time.Sleep(2500 * time.Millisecond)
 	time.AfterFunc(500*time.Millisecond, ccancel)
-	if err := WaitQuiet(cctx, db, "zdm_wq", "t", Gate{Seconds: 1, Poll: 100 * time.Millisecond, OnWait: func(Txn) {}}); err == nil {
+	if err := WaitQuiet(cctx, db, wq, Gate{Seconds: 1, Poll: 100 * time.Millisecond, OnWait: func(Txn) {}}); err == nil {
 		t.Error("a cancelled wait must return the context error")
 	}
 }
@@ -195,7 +197,7 @@ func TestGateKillsOnlyIdleReadOnlyHoldersAndHonoursDeadline(t *testing.T) {
 	defer func() { _ = writer.Close() }()
 	time.Sleep(2 * time.Second)
 	kills := 0
-	err = WaitQuiet(ctx, db, "zdm_gk", "t", Gate{
+	err = WaitQuiet(ctx, db, []TableRef{{"zdm_gk", "t"}}, Gate{
 		Seconds: 1, Poll: 200 * time.Millisecond, MaxWait: 3 * time.Second, KillAfter: time.Second,
 		OnWait: func(Txn) {}, OnKill: func(Txn, error) { kills++ },
 	})
@@ -210,7 +212,7 @@ func TestGateKillsOnlyIdleReadOnlyHoldersAndHonoursDeadline(t *testing.T) {
 	reader := hold("START TRANSACTION", "SELECT * FROM zdm_gk.t")
 	defer func() { _ = reader.Close() }()
 	time.Sleep(2 * time.Second)
-	err = WaitQuiet(ctx, db, "zdm_gk", "t", Gate{
+	err = WaitQuiet(ctx, db, []TableRef{{"zdm_gk", "t"}}, Gate{
 		Seconds: 1, Poll: 200 * time.Millisecond, MaxWait: 10 * time.Second, KillAfter: time.Second,
 		OnWait: func(Txn) {}, OnKill: func(Txn, error) { kills++ },
 	})
@@ -222,7 +224,7 @@ func TestGateKillsOnlyIdleReadOnlyHoldersAndHonoursDeadline(t *testing.T) {
 	reader2 := hold("START TRANSACTION", "SELECT * FROM zdm_gk.t")
 	defer func() { _, _ = reader2.ExecContext(context.Background(), "ROLLBACK"); _ = reader2.Close() }()
 	time.Sleep(2 * time.Second)
-	err = WaitQuiet(ctx, db, "zdm_gk", "t", Gate{Seconds: 1, Poll: 200 * time.Millisecond, MaxWait: 2 * time.Second, OnWait: func(Txn) {}})
+	err = WaitQuiet(ctx, db, []TableRef{{"zdm_gk", "t"}}, Gate{Seconds: 1, Poll: 200 * time.Millisecond, MaxWait: 2 * time.Second, OnWait: func(Txn) {}})
 	if !errors.Is(err, ErrGateTimeout) || !alive(reader2) {
 		t.Fatalf("without KillAfter nothing is ended: err=%v alive=%v", err, alive(reader2))
 	}
