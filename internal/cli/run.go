@@ -19,6 +19,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 
 	"github.com/siddik7181/zdm/internal/advise"
+	"github.com/siddik7181/zdm/internal/cutover"
 	"github.com/siddik7181/zdm/internal/engine"
 	"github.com/siddik7181/zdm/internal/plan"
 	"github.com/siddik7181/zdm/internal/preflight"
@@ -188,12 +189,18 @@ func runCmd(args []string, s Streams) int {
 	defer stop()
 	log := func(m string) { fmt.Fprintln(s.Out, m) }
 
-	var resumed bool
+	var resumed, instant bool
 	steps := runner.Steps{
 		state.Preflight: func(ctx context.Context) error { return runPreflight(ctx, primary, replicas, p) },
 		state.Migrate: func(ctx context.Context) error {
 			var gateErr chan error
 			conn.Resume = resumed
+			if !resumed {
+				if done, err := tryInstant(ctx, *dsn, p, s.Out); err != nil || done {
+					instant = done
+					return err
+				}
+			}
 			onLine := func(l string) { fmt.Fprintln(s.Out, "  | "+l) }
 			if p.Engine == plan.GhOst {
 				gateErr = make(chan error, 1)
@@ -228,7 +235,7 @@ func runCmd(args []string, s Streams) int {
 			}
 			return err
 		},
-		state.Verify: func(ctx context.Context) error { return runner.PostCheck(ctx, primary, p) },
+		state.Verify: func(ctx context.Context) error { return runner.PostCheck(ctx, primary, p, instant) },
 	}
 
 	if !*execute {
@@ -325,4 +332,26 @@ func openGate(ctx context.Context, db *sql.DB, p plan.Plan, flag string, out io.
 	}
 	_ = os.Remove(flag) //nolint:gosec // flag is the temp path zdm itself chose
 	return nil
+}
+
+// tryInstant runs the change as ALGORITHM=INSTANT when MySQL allows it. It reports false, with no
+// error, when the engine must do the work.
+func tryInstant(ctx context.Context, dsn string, p plan.Plan, out io.Writer) (bool, error) {
+	db, err := cutover.Open(dsn, p.Cutover.LockTimeoutSeconds)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = db.Close() }()
+	err = cutover.TryInstant(ctx, db, p, func(n int, err error) {
+		fmt.Fprintf(out, "instant alter blocked (attempt %d): %v\n", n, err)
+	})
+	switch {
+	case err == nil:
+		fmt.Fprintln(out, "applied as ALGORITHM=INSTANT: metadata only, no copy and no swap; there is no old table to roll back to")
+		return true, nil
+	case errors.Is(err, cutover.ErrNotInstant):
+		fmt.Fprintln(out, "not an INSTANT change; using "+p.Engine)
+		return false, nil
+	}
+	return false, err
 }

@@ -59,3 +59,10 @@ func TestBackoffDoublesCapsAndJitters(t *testing.T) {
 		}
 	}
 }
+
+func TestPinnedAlgorithmIsNeverOverridden(t *testing.T) {
+	p := plan.Default("s", "t", "ADD COLUMN c INT NULL, ALGORITHM=INPLACE", plan.GhOst)
+	if err := TryInstant(context.Background(), nil, p, nil); !errors.Is(err, ErrNotInstant) {
+		t.Fatalf("got %v", err)
+	}
+}

@@ -21,7 +21,8 @@ func exists(ctx context.Context, db *sql.DB, schema, table string) (bool, error)
 // PostCheck confirms the engine left the schema clean: the table exists, no half-built
 // helper tables remain, and the old table is kept exactly when the plan asked for it.
 // It is safe to repeat. It does not prove the data matches; see docs for the verification roadmap.
-func PostCheck(ctx context.Context, db *sql.DB, p plan.Plan) error {
+// With instant set the change ran in place, so there is no old table and nothing to roll back to.
+func PostCheck(ctx context.Context, db *sql.DB, p plan.Plan, instant bool) error {
 	ok, err := exists(ctx, db, p.Schema, p.Table)
 	if err != nil {
 		return err
@@ -43,6 +44,12 @@ func PostCheck(ctx context.Context, db *sql.DB, p plan.Plan) error {
 	hasOld, err := exists(ctx, db, p.Schema, old)
 	if err != nil {
 		return err
+	}
+	if instant {
+		if hasOld {
+			return fmt.Errorf("old table %s.%s exists after an in-place change; it was not created by this plan", p.Schema, old)
+		}
+		return nil
 	}
 	if p.KeepOldTable && !hasOld {
 		return fmt.Errorf("old table %s.%s is missing, so there is nothing to roll back to", p.Schema, old)

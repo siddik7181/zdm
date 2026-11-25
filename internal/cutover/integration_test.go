@@ -153,3 +153,88 @@ func TestCleanupDropsOnlyEngineHelpers(t *testing.T) {
 		t.Fatalf("user trigger or old table was dropped: trigger=%d old=%v", n, ok)
 	}
 }
+
+func fkSetup(t *testing.T, schema string) (*sql.DB, plan.Plan) {
+	t.Helper()
+	db, p := setup(t, schema)
+	for _, q := range []string{
+		"DROP DATABASE " + schema, "CREATE DATABASE " + schema,
+		"CREATE TABLE " + schema + ".parent (id INT PRIMARY KEY, v VARCHAR(10)) ENGINE=InnoDB",
+		"CREATE TABLE " + schema + ".child (id INT PRIMARY KEY, pid INT, KEY(pid), FOREIGN KEY (pid) REFERENCES " + schema + ".parent(id) ON DELETE CASCADE) ENGINE=InnoDB",
+		"INSERT INTO " + schema + ".parent VALUES (1,'a'),(2,'b')", "INSERT INTO " + schema + ".child VALUES (1,1),(2,2)",
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	p.Table, p.Alter = "parent", "ADD COLUMN c INT NULL"
+	return db, p
+}
+
+func TestTryInstantOnForeignKeyParentKeepsData(t *testing.T) {
+	db, p := fkSetup(t, "zdm_inst1")
+	ctx := context.Background()
+	if err := TryInstant(ctx, db, p, nil); err != nil {
+		t.Fatal(err)
+	}
+	var cols, rows, kids int
+	_ = db.QueryRow("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='zdm_inst1' AND TABLE_NAME='parent' AND COLUMN_NAME='c'").Scan(&cols)
+	_ = db.QueryRow("SELECT COUNT(*) FROM zdm_inst1.parent").Scan(&rows)
+	_ = db.QueryRow("SELECT COUNT(*) FROM zdm_inst1.child").Scan(&kids)
+	if cols != 1 || rows != 2 || kids != 2 {
+		t.Fatalf("column=%d parent=%d child=%d", cols, rows, kids)
+	}
+	if err := Rollback(ctx, db, p, Sleep); !errors.Is(err, ErrNothingToRollBack) {
+		t.Fatalf("rollback after INSTANT must say there is nothing to roll back to, got %v", err)
+	}
+}
+
+func TestTryInstantRefusesWhatNeedsARebuildAndChangesNothing(t *testing.T) {
+	db, p := fkSetup(t, "zdm_inst2")
+	p.Alter = "MODIFY v VARCHAR(300)" // widening past the length-byte boundary cannot be INSTANT
+	if err := TryInstant(context.Background(), db, p, nil); !errors.Is(err, ErrNotInstant) {
+		t.Fatalf("want ErrNotInstant, got %v", err)
+	}
+	var n int
+	_ = db.QueryRow("SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS WHERE TABLE_SCHEMA='zdm_inst2' AND TABLE_NAME='parent' AND COLUMN_NAME='v'").Scan(&n)
+	if n != 10 {
+		t.Fatalf("column changed to %d", n)
+	}
+}
+
+func TestTryInstantRetriesWhileBlockedThenSucceeds(t *testing.T) {
+	db, p := fkSetup(t, "zdm_inst3")
+	ctx := context.Background()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec("SELECT * FROM zdm_inst3.parent"); err != nil {
+		t.Fatal(err)
+	}
+	p.Cutover.MaxAttempts = 6
+	retries := 0
+	go func() { time.Sleep(2500 * time.Millisecond); _ = tx.Commit() }()
+	if err := TryInstant(ctx, db, p, func(int, error) { retries++ }); err != nil {
+		t.Fatal(err)
+	}
+	if retries == 0 {
+		t.Fatal("expected at least one blocked attempt")
+	}
+}
+
+func TestTryInstantGivesUpAfterMaxAttempts(t *testing.T) {
+	db, p := fkSetup(t, "zdm_inst4")
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec("SELECT * FROM zdm_inst4.parent"); err != nil {
+		t.Fatal(err)
+	}
+	p.Cutover.MaxAttempts = 2
+	if err := TryInstant(context.Background(), db, p, nil); err == nil || errors.Is(err, ErrNotInstant) {
+		t.Fatalf("want a blocked error, got %v", err)
+	}
+}

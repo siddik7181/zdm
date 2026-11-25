@@ -96,6 +96,15 @@ would discard its writes. Residual risk: a read-only transaction that is ended m
 statement on that connection fail (it reconnects or errors); nothing is corrupted. Tested against MySQL 8.4
 (writer survives, idle reader ended, deadline fires); not tested against a real gh-ost run.
 
+**INSTANT first (done).** `cutover.TryInstant` runs the ALTER with `, ALGORITHM=INSTANT` before any engine,
+on a connection with the plan's `lock_wait_timeout`. Errors 1845/1846 mean "not INSTANT": nothing changed, the engine
+runs. 1205/1213 are retried with the same backoff, up to `max_attempts`. An ALTER that pins its own `ALGORITHM` is
+left to the engine. Verified on 8.4 and 9.7 on a foreign-key parent (data and child rows intact; blocked-then-succeeds;
+gives up after `max_attempts`) and end to end through `zdm run`. In a 200k-row lab, INSTANT/INPLACE changes on an FK
+parent and child under live child writes stayed below 500 ms per insert; a type change needed pt-osc (4 s, FK intact).
+After INSTANT there is no old table (`PostCheck` accepts that; `rollback` reports nothing to roll back to). Still
+unbuilt: a pt-osc gate that includes FK relatives, and measurement with multi-GB children.
+
 **Retry backoff.** The plan has `backoff_seconds` (default 1) and `max_backoff_seconds` (default 30). The wait
 between failed swap attempts doubles from the first up to the second. zdm's own retries (`rollback`) wait
 half the doubled value plus a random share of the other half, so concurrent retriers spread out. gh-ost gets

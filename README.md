@@ -54,6 +54,14 @@ wait between attempts (`backoff_seconds` 1 doubling to `max_backoff_seconds` 30;
 `kill_idle_after_seconds` ends holders idle in a read-only transaction; one that has written rows is never ended.
 Ctrl-C also stops the wait. pt-osc has no gate: a long open transaction makes it hit `lock_wait_timeout`, stall
 writes and fail with the table unchanged. Lab numbers and limits: `docs/08-cutover-pause.md`.
+
+**INSTANT first.** Before starting an engine, `zdm run` tries the plan's ALTER with `ALGORITHM=INSTANT` (for example
+`ADD COLUMN ... NULL`). It is metadata only: no copy, no swap, no replica lag, and it works on foreign-key parents
+and children. If MySQL refuses it, nothing changed and the planned engine runs. A lock timeout is retried with
+backoff, up to `max_attempts`. INPLACE is never tried (it rebuilds the table and lags replicas). There is no old
+table after an INSTANT change, so `zdm rollback` has nothing to restore; take a backup if you need a way back.
+`zdm plan` lists foreign-key child tables of 1M rows or more, because pt-osc rebuilds each child's constraint
+after the swap.
 ```
 zdm verify plan.json                                   # checksum the new table against the old one
 zdm rollback plan.json --discard-writes-since-swap     # put the old table back
