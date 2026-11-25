@@ -191,3 +191,64 @@ func TestPlanRunUsesInstantOnForeignKeyParent(t *testing.T) {
 		t.Fatalf("column=%d children=%d helper tables=%d", cols, kids, parked)
 	}
 }
+
+// A transaction open on a foreign-key child makes pt-osc's child ALTER time out. The gate waits for it.
+func TestPtOscWaitsForOpenTransactionOnChild(t *testing.T) {
+	dsn := os.Getenv("ZDM_TEST_DSN")
+	if dsn == "" {
+		t.Skip("lab DSN not set")
+	}
+	if _, err := exec.LookPath("pt-online-schema-change"); err != nil {
+		t.Skip("pt-online-schema-change not on PATH")
+	}
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	const schema = "zdm_e2e_child_txn"
+	for _, q := range []string{
+		"DROP DATABASE IF EXISTS " + schema, "CREATE DATABASE " + schema,
+		"CREATE TABLE " + schema + ".p (id INT PRIMARY KEY, v VARCHAR(10))",
+		"CREATE TABLE " + schema + ".c (id INT PRIMARY KEY, pid INT, KEY(pid), FOREIGN KEY (pid) REFERENCES " + schema + ".p(id))",
+		"INSERT INTO " + schema + ".p VALUES (1,'a'),(2,'b')", "INSERT INTO " + schema + ".c VALUES (1,1),(2,2)",
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	t.Cleanup(func() { _, _ = db.Exec("DROP DATABASE IF EXISTS " + schema) })
+
+	planFile := filepath.Join(t.TempDir(), "plan.json")
+	var out, errb bytes.Buffer
+	s := Streams{Out: &out, Err: &errb}
+	if code := Run([]string{"plan", "--dsn", dsn, "--schema", schema, "--table", "p", "--alter", "MODIFY v VARCHAR(300)", "--no-instant", "--out", planFile}, s); code != 0 {
+		t.Fatalf("plan: %d %s", code, errb.String())
+	}
+	conn, err := db.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(context.Background(), "BEGIN"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(context.Background(), "SELECT * FROM "+schema+".c"); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(12 * time.Second)
+		_, _ = conn.ExecContext(context.Background(), "COMMIT")
+		_ = conn.Close()
+	}()
+	if code := Run([]string{"run", "--execute", "--dsn", dsn, planFile}, s); code != 0 {
+		t.Fatalf("run: %d\n%s\n%s", code, out.String(), errb.String())
+	}
+	if !strings.Contains(out.String(), "cut-over held") {
+		t.Fatalf("the child's transaction did not hold the cut-over:\n%s", out.String())
+	}
+	var l int
+	_ = db.QueryRow("SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=? AND TABLE_NAME='p' AND COLUMN_NAME='v'", schema).Scan(&l)
+	if l != 300 {
+		t.Fatalf("column length %d", l)
+	}
+}

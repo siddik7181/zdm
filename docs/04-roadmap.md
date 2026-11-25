@@ -80,8 +80,7 @@ One 100M-row gh-ost run with concurrent writes passed on 9.7 (`07-large-table-ru
 `preflight.WaitQuiet`) and removes the flag only when no holder on the table is older than the plan's
 `lock_timeout_seconds`. Young holders are ignored: they finish before the swap's lock timeout. Long
 autocommit SELECTs are caught too, because the age is the larger of the transaction age and the
-processlist time. The wait is unbounded (stop with Ctrl-C). pt-osc has no equivalent and relies on
-`lock_wait_timeout`. Measured in `08-cutover-pause.md`.
+processlist time. The wait is unbounded (stop with Ctrl-C). pt-osc is gated too (below). Measured in `08-cutover-pause.md`.
 
 Defaults are now `lock_timeout_seconds: 1`, `max_attempts: 10` (gh-ost's `--default-retries` also governs
 copy retries; its own default is 60). A zdm-owned bounded cut-over was **not** built: gh-ost owns the
@@ -102,8 +101,24 @@ runs. 1205/1213 are retried with the same backoff, up to `max_attempts`. An ALTE
 left to the engine. Verified on 8.4 and 9.7 on a foreign-key parent (data and child rows intact; blocked-then-succeeds;
 gives up after `max_attempts`) and end to end through `zdm run`. In a 200k-row lab, INSTANT/INPLACE changes on an FK
 parent and child under live child writes stayed below 500 ms per insert; a type change needed pt-osc (4 s, FK intact).
-After INSTANT there is no old table (`PostCheck` accepts that; `rollback` reports nothing to roll back to). Still
-unbuilt: a pt-osc gate that includes FK relatives, and measurement with multi-GB children.
+After INSTANT there is no old table (`PostCheck` accepts that; `rollback` reports nothing to roll back to).
+
+**Gated cut-over (pt-osc, FK-aware).** pt-osc 3.x re-points each child's foreign key at the new table *before* the
+swap (its triggers keep the new table in step, so integrity holds), then does one atomic RENAME. zdm loads a
+generated plugin (`--plugin`) whose `before_update_foreign_keys` and `before_swap_tables` hooks wait while a flag
+file exists. After "Copied rows OK", zdm polls `metadata_locks` for the table **and its FK children**
+(`advise.Gather` lists them) and removes the file when none is older than `lock_timeout_seconds`. Why children: the
+re-point is an `ALTER` on the child and needs its exclusive metadata lock, so a transaction open on a child makes it
+time out and queues the child's writes meanwhile. Lab (8.4, parent 21k rows, child 8M rows / 1 GB, 8 writers
+inserting a parent row then a child row, a 30 s transaction open on the child): without the gate pt-osc **failed**
+(`p` unchanged, triggers left for `zdm cleanup`), 80 inserts over 500 ms, max 1033 ms; with the gate it completed,
+0 errors, 0 inserts over 500 ms, max 153 ms, 0 orphans. Single runs. If zdm is killed with SIGKILL the flag file
+stays and pt-osc keeps waiting; stop it and run `zdm cleanup`.
+
+**Correction.** An earlier note said `rebuild_constraints` is slow on large children. With `foreign_key_checks=0`,
+which pt-osc sets for that `ALTER`, InnoDB re-points the key as metadata only: 92 ms on the 8M-row child. The same
+`ALTER` with checks on needs `ALGORITHM=COPY`: 39 s, writes blocked. So child *size* is not the risk, an open
+transaction on the child is.
 
 **Retry backoff.** The plan has `backoff_seconds` (default 1) and `max_backoff_seconds` (default 30). The wait
 between failed swap attempts doubles from the first up to the second. zdm's own retries (`rollback`) wait

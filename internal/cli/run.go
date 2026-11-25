@@ -202,23 +202,35 @@ func runCmd(args []string, s Streams) int {
 					return err
 				}
 			}
-			onLine := func(l string) { fmt.Fprintln(s.Out, "  | "+l) }
+			dir, err := os.MkdirTemp("", "zdm-gate-")
+			if err != nil {
+				return err
+			}
+			defer func() { _ = os.RemoveAll(dir) }()
+			flag, copied := filepath.Join(dir, "postpone"), "Row copy complete"
 			if p.Engine == plan.GhOst {
-				gateErr = make(chan error, 1)
-				dir, err := os.MkdirTemp("", "zdm-gate-")
-				if err != nil {
+				conn.PostponeFlag = flag
+			} else {
+				// pt-osc waits while the file exists; it also has to wait for the children it re-points.
+				if err := os.WriteFile(flag, nil, 0o600); err != nil {
 					return err
 				}
-				defer func() { _ = os.RemoveAll(dir) }()
-				conn.PostponeFlag = filepath.Join(dir, "postpone")
-				var once sync.Once
-				ctx, cancel := context.WithCancel(ctx)
-				defer cancel()
-				onLine = func(l string) {
-					fmt.Fprintln(s.Out, "  | "+l)
-					if strings.Contains(l, "Row copy complete") {
-						once.Do(func() { go func() { gateErr <- openGate(ctx, primary, p, conn.PostponeFlag, s.Out, cancel) }() })
-					}
+				conn.HoldFile, copied = flag, "Copied rows OK"
+			}
+			tables := []preflight.TableRef{{Schema: p.Schema, Name: p.Table}}
+			if facts, err := advise.Gather(ctx, primary, p.Schema, p.Table); err == nil {
+				for _, c := range facts.Children {
+					tables = append(tables, preflight.TableRef{Schema: c.Schema, Name: c.Name})
+				}
+			}
+			gateErr = make(chan error, 1)
+			var once sync.Once
+			ctx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			onLine := func(l string) {
+				fmt.Fprintln(s.Out, "  | "+l)
+				if strings.Contains(l, copied) {
+					once.Do(func() { go func() { gateErr <- openGate(ctx, primary, p, tables, flag, s.Out, cancel) }() })
 				}
 			}
 			spec, err := engine.Build(p, conn, true)
@@ -302,17 +314,17 @@ func runPreflight(ctx context.Context, primary *sql.DB, replicas []preflight.Rep
 }
 
 // openGate lets gh-ost cut over once no long transaction could hold the swap back. If the check
-// itself fails, the cut-over is still released: gh-ost's own lock timeout bounds the damage. If holders
+// itself fails, the cut-over is still released: the engine's own lock timeout bounds the damage. If holders
 // outlast the plan's deadline it stops the run instead, which leaves the table untouched.
-func openGate(ctx context.Context, db *sql.DB, p plan.Plan, flag string, out io.Writer, stopRun func()) error {
+func openGate(ctx context.Context, db *sql.DB, p plan.Plan, tables []preflight.TableRef, flag string, out io.Writer, stopRun func()) error {
 	c := p.Cutover
-	err := preflight.WaitQuiet(ctx, db, p.Schema, p.Table, preflight.Gate{
+	err := preflight.WaitQuiet(ctx, db, tables, preflight.Gate{
 		// A holder older than the lock timeout would make the swap attempt fail, so that is the bar.
 		Seconds: c.LockTimeoutSeconds, Poll: 5 * time.Second,
 		MaxWait:   time.Duration(c.GateMaxWaitSeconds) * time.Second,
 		KillAfter: time.Duration(c.KillIdleAfterSeconds) * time.Second,
 		OnWait: func(t preflight.Txn) {
-			fmt.Fprintf(out, "cut-over held: session %s has held a lock on the table for %ds\n", t.ID, t.AgeSeconds)
+			fmt.Fprintf(out, "cut-over held: session %s has held a lock on the table or a foreign-key child for %ds\n", t.ID, t.AgeSeconds)
 		},
 		OnKill: func(t preflight.Txn, err error) {
 			if err != nil {

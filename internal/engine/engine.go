@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +35,10 @@ type Conn struct {
 	// PostponeFlag is a path gh-ost creates and keeps until it is removed; while it exists gh-ost
 	// finishes the copy but holds back the cut-over, so the caller picks the moment.
 	PostponeFlag string
+	// HoldFile is, for pt-osc, a path that zdm creates and later removes. A plugin makes pt-osc wait
+	// before it re-points child foreign keys and swaps tables for as long as the file exists, so
+	// the caller picks the moment, as PostponeFlag does for gh-ost.
+	HoldFile string
 	// Resume means an earlier attempt may have been killed; gh-ost then drops its own leftover
 	// ghost table and socket file instead of refusing to start.
 	Resume bool
@@ -129,16 +134,66 @@ func Build(p plan.Plan, c Conn, execute bool) (Spec, error) {
 		if c.ReplicaHost != "" {
 			args = append(args, fmt.Sprintf("--check-replica-lag=h=%s,P=%d,F=%s", c.ReplicaHost, c.ReplicaPort, cred))
 		}
+		files := []string{cred}
 		if p.KeepOldTable {
 			args = append(args, "--no-drop-old-table")
+		}
+		if execute && c.HoldFile != "" {
+			plugin, err := holdPlugin(c.HoldFile)
+			if err != nil {
+				_ = os.Remove(cred)
+				return Spec{}, err
+			}
+			args, files = append(args, "--plugin="+plugin), append(files, plugin)
 		}
 		if execute {
 			args = append(args, "--execute")
 		} else {
 			args = append(args, "--dry-run")
 		}
-		return Spec{Bin: "pt-online-schema-change", Args: args, Files: []string{cred}}, nil
+		return Spec{Bin: "pt-online-schema-change", Args: args, Files: files}, nil
 	}
+}
+
+// holdPluginSrc is a pt-osc plugin. Both hooks run after the row copy, the first before child foreign
+// keys are re-pointed (only if there are children), the second before the swap. It prints while it
+// waits so the stall watchdog does not mistake the wait for a hang.
+const holdPluginSrc = `package pt_online_schema_change_plugin;
+use strict;
+use warnings;
+$| = 1;
+my $hold = '%s';
+sub new { my ($class, %%args) = @_; return bless {}, $class; }
+sub _wait {
+   my $n = 0;
+   while (-e $hold) {
+      print "zdm: cut-over held until no long transaction touches the table or its foreign-key children\n" unless $n++ %% 10;
+      sleep 1;
+   }
+}
+sub before_update_foreign_keys { _wait() }
+sub before_swap_tables { _wait() }
+1;
+`
+
+// holdPlugin writes the plugin that waits on path and returns its location.
+func holdPlugin(path string) (string, error) {
+	if strings.ContainsAny(path, "'\\\n") {
+		return "", errors.New("engine: hold file path has characters the plugin cannot quote")
+	}
+	f, err := os.CreateTemp("", "zdm-hold-*.pm") // mode 0600
+	if err != nil {
+		return "", err
+	}
+	_, err = fmt.Fprintf(f, holdPluginSrc, path)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
 }
 
 // ErrStalled means the engine printed nothing for longer than the stall timeout.

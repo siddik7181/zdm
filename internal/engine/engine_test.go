@@ -125,3 +125,28 @@ func TestRunReportsMissingBinary(t *testing.T) {
 		t.Fatal("want start error")
 	}
 }
+
+func TestPtOscHoldPluginWaitsOnTheFlagFile(t *testing.T) {
+	c := conn()
+	c.HoldFile = "/tmp/zdm-gate-x/postpone"
+	spec, err := Build(plan.Default("app", "t", "ADD COLUMN c INT NULL", plan.PtOsc), c, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spec.Cleanup()
+	i := slices.IndexFunc(spec.Args, func(a string) bool { return strings.HasPrefix(a, "--plugin=") })
+	if i < 0 {
+		t.Fatal("no --plugin argument")
+	}
+	b, err := os.ReadFile(strings.TrimPrefix(spec.Args[i], "--plugin="))
+	if err != nil || !strings.Contains(string(b), "my $hold = '/tmp/zdm-gate-x/postpone';") || !strings.Contains(string(b), "before_update_foreign_keys") {
+		t.Fatalf("plugin: %v\n%s", err, b)
+	}
+	c.HoldFile = "/tmp/a'b"
+	if _, err := Build(plan.Default("app", "t", "ADD COLUMN c INT NULL", plan.PtOsc), c, true); err == nil {
+		t.Fatal("a path that breaks Perl quoting must be refused")
+	}
+	if dry, _ := Build(plan.Default("app", "t", "ADD COLUMN c INT NULL", plan.PtOsc), Conn{Host: "h", Port: 1, User: "u", HoldFile: "/tmp/x"}, false); slices.ContainsFunc(dry.Args, func(a string) bool { return strings.HasPrefix(a, "--plugin=") }) {
+		t.Fatal("a dry run must not load the plugin")
+	}
+}
