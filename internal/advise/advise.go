@@ -20,7 +20,17 @@ type TableFacts struct {
 	Triggers     int
 	Galera       bool
 	Rows         int64 // estimate from the optimizer statistics
+	Children     []Child
 }
+
+// Child is a table whose foreign key references the table being changed.
+type Child struct {
+	Schema, Name string
+	Rows         int64
+}
+
+// LargeChildRows is where pt-osc's per-child constraint rebuild stops being a quick step.
+const LargeChildRows = 1_000_000
 
 // Choice is the recommended engine and the reasons for it.
 type Choice struct {
@@ -47,6 +57,11 @@ func Choose(f TableFacts) Choice {
 	if f.ParentFKs > 0 {
 		why = append(why, fmt.Sprintf("%d foreign key(s) reference the table; gh-ost refuses these", f.ParentFKs))
 	}
+	for _, c := range f.Children {
+		if c.Rows >= LargeChildRows {
+			why = append(why, fmt.Sprintf("child table %s.%s has ~%d rows; pt-osc rebuilds its constraint after the swap, which can take long (an INSTANT change avoids this)", c.Schema, c.Name, c.Rows))
+		}
+	}
 	if f.Triggers > 0 {
 		why = append(why, fmt.Sprintf("%d existing trigger(s); gh-ost refuses these", f.Triggers))
 	}
@@ -70,6 +85,9 @@ const (
 		GROUP BY s.INDEX_NAME HAVING SUM(c.IS_NULLABLE='YES')=0) u`
 	qChildFK  = `SELECT COUNT(*) FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=? AND TABLE_NAME=?`
 	qParentFK = `SELECT COUNT(*) FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE UNIQUE_CONSTRAINT_SCHEMA=? AND REFERENCED_TABLE_NAME=?`
+	qChildren = `SELECT rc.CONSTRAINT_SCHEMA, rc.TABLE_NAME, COALESCE(t.TABLE_ROWS,0) FROM information_schema.REFERENTIAL_CONSTRAINTS rc
+		JOIN information_schema.TABLES t ON t.TABLE_SCHEMA=rc.CONSTRAINT_SCHEMA AND t.TABLE_NAME=rc.TABLE_NAME
+		WHERE rc.UNIQUE_CONSTRAINT_SCHEMA=? AND rc.REFERENCED_TABLE_NAME=? ORDER BY 3 DESC LIMIT 50`
 	qTriggers = `SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE EVENT_OBJECT_SCHEMA=? AND EVENT_OBJECT_TABLE=?`
 	qGalera   = `SHOW VARIABLES LIKE 'wsrep_on'`
 )
@@ -95,6 +113,21 @@ func Gather(ctx context.Context, db *sql.DB, schema, table string) (TableFacts, 
 		if err := db.QueryRowContext(ctx, c.q, schema, table).Scan(c.dst); err != nil {
 			return f, fmt.Errorf("facts: %w", err)
 		}
+	}
+	rows, err := db.QueryContext(ctx, qChildren, schema, table)
+	if err != nil {
+		return f, fmt.Errorf("children: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var c Child
+		if err := rows.Scan(&c.Schema, &c.Name, &c.Rows); err != nil {
+			return f, fmt.Errorf("children: %w", err)
+		}
+		f.Children = append(f.Children, c)
+	}
+	if err := rows.Err(); err != nil {
+		return f, fmt.Errorf("children: %w", err)
 	}
 	var unique int
 	if err := db.QueryRowContext(ctx, qUnique, schema, table).Scan(&unique); err != nil {

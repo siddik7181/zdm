@@ -1,6 +1,7 @@
 package advise
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/siddik7181/zdm/internal/plan"
@@ -29,5 +30,15 @@ func TestChoose(t *testing.T) {
 		if got.Engine != c.engine || got.Refuse != c.refuse || len(got.Reasons) == 0 {
 			t.Errorf("%s: %+v", c.name, got)
 		}
+	}
+}
+
+func TestLargeChildIsReported(t *testing.T) {
+	c := Choose(TableFacts{
+		Exists: true, InnoDB: true, HasUniqueKey: true, ParentFKs: 1,
+		Children: []Child{{"s", "small", 10}, {"s", "big", LargeChildRows}},
+	})
+	if len(c.Reasons) != 2 || !strings.Contains(c.Reasons[1], "s.big") {
+		t.Fatalf("reasons = %v", c.Reasons)
 	}
 }

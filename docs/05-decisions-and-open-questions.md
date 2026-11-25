@@ -17,6 +17,7 @@
 | D11 | Goals: learning **and** an open-source project | Changes priorities: adoption path, hygiene, trust |
 | D12 | Plan only until the Docker lab; docs kept in `docs/` | |
 | D13 | gh-ost cut-over is gated on `performance_schema.metadata_locks` holders (age above the lock timeout); defaults 1 s lock timeout, 10 attempts | gh-ost owns the cut-over, so zdm holds it with `--postpone-cut-over-flag-file` rather than building its own bounded cut-over (killing gh-ost's waiting session would break it). pt-osc has no gate. See `04-roadmap.md`, `08-cutover-pause.md` |
+| D14 | `zdm run` first tries the change as `ALGORITHM=INSTANT` and uses the engine only when MySQL refuses it (errors 1845/1846); INPLACE is never tried | INSTANT is metadata-only: no copy, no triggers, no swap, no replica lag, and it works on foreign-key parents and children where gh-ost refuses and pt-osc must rebuild constraints. INPLACE rebuilds the table, and replicas apply DDL serially, so it would lag them. After INSTANT there is no old table, so `rollback` has nothing to restore. A `plan` warns about child tables of 1M rows or more, whose constraint rebuild makes pt-osc slow |
 
 ## 2. Positioning (honest)
 
