@@ -52,7 +52,7 @@ func TestPlanRunEndToEndWithGhost(t *testing.T) {
 	planFile := filepath.Join(t.TempDir(), "plan.json")
 	var out, errb bytes.Buffer
 	s := Streams{Out: &out, Err: &errb}
-	if code := Run([]string{"plan", "--dsn", dsn, "--schema", schema, "--table", "t", "--alter", "ADD COLUMN c INT NULL", "--out", planFile}, s); code != 0 {
+	if code := Run([]string{"plan", "--dsn", dsn, "--schema", schema, "--table", "t", "--alter", "ADD COLUMN c INT NULL", "--no-instant", "--out", planFile}, s); code != 0 {
 		t.Fatalf("plan: %d %s", code, errb.String())
 	}
 
@@ -122,7 +122,7 @@ func TestPlanRunEndToEndWithPtOscForeignKeys(t *testing.T) {
 		planFile := filepath.Join(t.TempDir(), table+".json")
 		var out, errb bytes.Buffer
 		s := Streams{Out: &out, Err: &errb}
-		if code := Run([]string{"plan", "--dsn", dsn, "--schema", schema, "--table", table, "--alter", "ADD COLUMN c INT NULL", "--out", planFile}, s); code != 0 {
+		if code := Run([]string{"plan", "--dsn", dsn, "--schema", schema, "--table", table, "--alter", "ADD COLUMN c INT NULL", "--no-instant", "--out", planFile}, s); code != 0 {
 			t.Fatalf("plan %s: %d %s", table, code, errb.String())
 		}
 		if !strings.Contains(out.String(), "engine pt-osc") {
@@ -144,5 +144,50 @@ func TestPlanRunEndToEndWithPtOscForeignKeys(t *testing.T) {
 	var fks int
 	if err := db.QueryRow("SELECT COUNT(*) FROM information_schema.REFERENTIAL_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=? AND TABLE_NAME='child'", schema).Scan(&fks); err != nil || fks != 1 {
 		t.Fatalf("foreign key lost: %d %v", fks, err)
+	}
+}
+
+// An ADD COLUMN on a foreign-key parent runs as INSTANT: no engine, no old table, data intact.
+func TestPlanRunUsesInstantOnForeignKeyParent(t *testing.T) {
+	dsn := os.Getenv("ZDM_TEST_DSN")
+	if dsn == "" {
+		t.Skip("lab DSN not set")
+	}
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	const schema = "zdm_e2e_instant"
+	for _, q := range []string{
+		"DROP DATABASE IF EXISTS " + schema, "CREATE DATABASE " + schema,
+		"CREATE TABLE " + schema + ".p (id INT PRIMARY KEY)",
+		"CREATE TABLE " + schema + ".c (id INT PRIMARY KEY, pid INT, KEY(pid), FOREIGN KEY (pid) REFERENCES " + schema + ".p(id))",
+		"INSERT INTO " + schema + ".p VALUES (1),(2)", "INSERT INTO " + schema + ".c VALUES (1,1),(2,2)",
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	t.Cleanup(func() { _, _ = db.Exec("DROP DATABASE IF EXISTS " + schema) })
+
+	planFile := filepath.Join(t.TempDir(), "plan.json")
+	var out, errb bytes.Buffer
+	s := Streams{Out: &out, Err: &errb}
+	if code := Run([]string{"plan", "--dsn", dsn, "--schema", schema, "--table", "p", "--alter", "ADD COLUMN c INT NULL", "--out", planFile}, s); code != 0 {
+		t.Fatalf("plan: %d %s", code, errb.String())
+	}
+	if code := Run([]string{"run", "--execute", "--dsn", dsn, planFile}, s); code != 0 {
+		t.Fatalf("run: %d\n%s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "ALGORITHM=INSTANT") {
+		t.Fatalf("INSTANT was not used:\n%s", out.String())
+	}
+	var cols, kids, parked int
+	_ = db.QueryRow("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=? AND TABLE_NAME='p' AND COLUMN_NAME='c'", schema).Scan(&cols)
+	_ = db.QueryRow("SELECT COUNT(*) FROM " + schema + ".c").Scan(&kids)
+	_ = db.QueryRow("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=? AND TABLE_NAME LIKE '\\_p\\_%'", schema).Scan(&parked)
+	if cols != 1 || kids != 2 || parked != 0 {
+		t.Fatalf("column=%d children=%d helper tables=%d", cols, kids, parked)
 	}
 }

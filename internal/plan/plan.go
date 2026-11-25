@@ -47,6 +47,8 @@ type Plan struct {
 	StallTimeout string `json:"stall_timeout"`
 	// KeepOldTable leaves the pre-change table in place so the change can be rolled back.
 	KeepOldTable bool `json:"keep_old_table"`
+	// NoInstant skips the ALGORITHM=INSTANT attempt that otherwise runs before the engine.
+	NoInstant bool `json:"no_instant,omitempty"`
 }
 
 // Default fills the settings a plan author usually does not set.
