@@ -59,7 +59,7 @@ writes and fail with the table unchanged. Lab numbers and limits: `docs/08-cutov
 `ADD COLUMN ... NULL`). It is metadata only: no copy, no swap, no replica lag, and it works on foreign-key parents
 and children. If MySQL refuses it, nothing changed and the planned engine runs. A lock timeout is retried with
 backoff, up to `max_attempts`. INPLACE is never tried (it rebuilds the table and lags replicas). There is no old
-table after an INSTANT change, so `zdm rollback` has nothing to restore; take a backup if you need a way back.
+table after an INSTANT change, so `zdm rollback` has nothing to restore; take a backup if you need a way back. `zdm plan --no-instant` always uses the engine.
 `zdm plan` lists foreign-key child tables of 1M rows or more, because pt-osc rebuilds each child's constraint
 after the swap.
 ```

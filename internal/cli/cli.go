@@ -87,7 +87,7 @@ commands:
   version         print the version
 
 plan flags:
-  --dsn DSN --schema S --table T --alter "ADD COLUMN ..." [--engine auto|gh-ost|pt-osc] [--out FILE]
+  --dsn DSN --schema S --table T --alter "ADD COLUMN ..." [--engine auto|gh-ost|pt-osc] [--no-instant] [--out FILE]
 
 run flags:
   --dsn DSN                 primary (default $ZDM_DSN)

@@ -76,7 +76,7 @@ func crashAndResume(t *testing.T, dsn, replica, engine, helper string, needsClea
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	planFile := filepath.Join(dir, "plan.json")
-	if out, err := exec.Command(bin, "plan", "--dsn", dsn, "--schema", schema, "--table", "t", "--alter", "ADD COLUMN c INT NULL", "--out", planFile).CombinedOutput(); err != nil {
+	if out, err := exec.Command(bin, "plan", "--dsn", dsn, "--schema", schema, "--table", "t", "--alter", "ADD COLUMN c INT NULL", "--no-instant", "--out", planFile).CombinedOutput(); err != nil {
 		t.Fatalf("plan: %v\n%s", err, out)
 	}
 	if b, _ := os.ReadFile(planFile); engine == "pt-osc" {

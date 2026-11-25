@@ -52,7 +52,7 @@ func newLab(t *testing.T, schema string, rows int, engine string) *labEnv {
 	l := &labEnv{db: db, dsn: dsn, replica: replica, schema: schema, out: &bytes.Buffer{}, errb: &bytes.Buffer{}}
 	l.s = Streams{Out: l.out, Err: l.errb}
 	l.plan = filepath.Join(t.TempDir(), "plan.json")
-	if code := Run([]string{"plan", "--dsn", dsn, "--schema", schema, "--table", "t", "--alter", "ADD COLUMN c INT NULL", "--out", l.plan}, l.s); code != 0 {
+	if code := Run([]string{"plan", "--dsn", dsn, "--schema", schema, "--table", "t", "--alter", "ADD COLUMN c INT NULL", "--no-instant", "--out", l.plan}, l.s); code != 0 {
 		t.Fatalf("plan: %d %s", code, l.errb)
 	}
 	if engine == "pt-osc" {

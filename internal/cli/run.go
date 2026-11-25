@@ -38,6 +38,7 @@ func planCmd(args []string, s Streams) int {
 	alter := fs.String("alter", "", `ALTER clauses, e.g. "ADD COLUMN c INT NULL"`)
 	eng := fs.String("engine", "auto", "auto, gh-ost or pt-osc")
 	out := fs.String("out", "zdm-plan.json", "plan file to write")
+	noInstant := fs.Bool("no-instant", false, "always use the engine; do not try ALGORITHM=INSTANT first")
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
@@ -71,7 +72,7 @@ func planCmd(args []string, s Streams) int {
 		fmt.Fprintf(s.Err, "zdm: cannot plan: %s\n", strings.Join(choice.Reasons, "; "))
 		return exitFindings
 	}
-	p.Engine = choice.Engine
+	p.Engine, p.NoInstant = choice.Engine, *noInstant
 	if *eng != "auto" {
 		p.Engine = *eng
 		if *eng != choice.Engine {
@@ -195,7 +196,7 @@ func runCmd(args []string, s Streams) int {
 		state.Migrate: func(ctx context.Context) error {
 			var gateErr chan error
 			conn.Resume = resumed
-			if !resumed {
+			if !resumed && !p.NoInstant {
 				if done, err := tryInstant(ctx, *dsn, p, s.Out); err != nil || done {
 					instant = done
 					return err
